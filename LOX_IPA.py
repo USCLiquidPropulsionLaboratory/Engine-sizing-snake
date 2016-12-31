@@ -1,8 +1,8 @@
 ## LOX-IPA sim
 #@ Author Juha Nieminen
 
-import sys
-sys.path.insert(0, '/Users/juhanieminen/Documents/adamrocket')
+#import sys
+#sys.path.insert(0, '/Users/juhanieminen/Documents/adamrocket')
 
 import RocketComponents as rc
 from physical_constants import poise, inches, Runiv, gallons, lbm, \
@@ -15,12 +15,14 @@ import Flows1D as flows
 
 #DESIGN VARIABLES____________________________________________________________________________________
 
+
 # nominal parameters
-Preg            = 450*psi          # regulated pressurant outlet pressure [Pa]
+Preg_ox          = 425*psi         # regulated pressurant outlet pressure [Pa]
+Preg_fu          = 450*psi         # regulated pressurant outlet pressure [Pa]
 
 mdot_fuel_nom   = 0.2               # This is only for cooling jacket pressure drop purposes [kg/s]
 Pdrop_jacket_nom= 1*psi             # Cooling jacket pressure drop at mdot_nominal [Pa]
-OF_nom          = 2.25              # Oxidizer-to-fuel ratio. This has only effect on initial guesses during solving
+OF_nom          = 1.2               # Oxidizer-to-fuel ratio. This has only effect on initial guesses during solving
 
 # Pressurant tank dimensions
 Vprestank       = 0.08              # N2 pressurant tank volume [m3]
@@ -52,28 +54,41 @@ roughness       = 0.005             # epsilon/diameter, dimensionless
 Cv_ox_valve     = 17                # oxidizer valve characteristic parameter, dimensionless 
 Cv_fuel_valve   = 17                # fuel valve characteristic parameter, dimensionless
 
-# Injector
+# Pintle injector (Note that there is only CFD data for OD_shaft = [14mm,16mm] )
 
-cd_oxInjector   = 0.767                                                 # orifice discharge coefficient
-diameter_oxInjectorHoles = 2.0e-3 #number xx drill                        # ox orifice diameter [m]
-#length_oxHole   = 0.005                                                # ox orifice length [m]
-numOxInjectorHoles = 28                                                 # number of ox orifices in the injector
-area_oxInjector = numOxInjectorHoles*pi*diameter_oxInjectorHoles**2/4   # total ox flow area [m2]
+# Fuel side
+d_in_fu         = 0.5*inches                                # injector inlet diameter, m
+d_mani_fu       = 0.03                                      # manifold/converging section inlet diameter, m
+ID_shaft        = 0.01                                      # fuel annulus ID, m
+OD_shaft        = 0.015   #see note above                   # fuel annulus OD, m
+L_shaft_fu      = 0.075                                     # Length of annular flow path, m
+r_tip           = 0.0105                                    # pintle tip radius, m
+A_fu_annulus    = pi/4*(OD_shaft**2 - ID_shaft**2)          # annulus cross section, m^2
+h_exit          = A_fu_annulus/(2*pi*r_tip)                 # pintle exit slot height, m
+Dh_fu           = OD_shaft - ID_shaft                       # annulus hydraulic diameter, m
+rou_fu          = 2e-6/Dh_fu                                # annulus _DIMENSIONLESS_ roughness]
+# Ox side
+d_in_ox         = 0.5*inches                                # injector inlet diameter (two inlets!)
+d_mani_ox       = 0.08                                      # ox manifold diameter upstream from orifice plate, m
+Nori            = 8                                         # number of orifices in orifice plate
+d_ori           = 3.5e-3                                    # single orifice diameter, m
+cd_ori          = 0.7                                       # orifice discharge coefficient in orifice plate, dimensionless
+OD_ann          = 0.0227                                    # converging section end/annulus outer diameter, m
+ID_ann          = 0.019                                     # central shaft outer diameter, m
+L_shaft_ox      = 0.01                                      # Length of annular flow path, m
+Dh_ox           = OD_ann - ID_ann                           # annulus hydraulic diameter, m
+rou_ox          = 2e-6/Dh_ox                                # annulus _DIMENSIONLESS_ roughness
 
-cd_fuelInjector = 0.767                                                 # orifice discharge coefficient
-diameter_fuelInjectorHoles = 1.7e-3 #number xx drill                    # fuel orifice diameter [m]
-numFuelHoles    = 40                                                    # number of fuel orifices in the injector
-area_fuelInjector = numFuelHoles*pi*diameter_fuelInjectorHoles**2/4     # total fuel flow area [m2]
 
 # Define initial/nominal conditions in the chamber (obtained from CEA code assuming OFratio = 1.2)
-TfireInit       = 293                                                   # initial flame temperature [K]
-Tfire_nom       = 2675                                                  # nominal flame temperature [K]
-Pfire           = 1*atm                                                 # initial chamber pressure [Pa]
-gammaFireInit   = 1.16                                                  # dimensionless
+TfireInit       = 293                                       # initial flame temperature [K]
+Tfire_nom       = 2675                                      # nominal flame temperature [K]
+Pfire           = 1*atm                                     # initial chamber pressure [Pa]
+gammaFireInit   = 1.16                                      # dimensionless
 ga              = gammaFireInit
-mbarFireInit    = 19.10                              # combustion products' initial molecular mass [kg/kmol]
-RfireInit       = Runiv/mbarFireInit                 # combustion products' initial specific gas constant [J/kgK]
-Pambient        = atm                                                   # ambient pressure [Pa]
+mbarFireInit    = 19.10                                     # combustion products' initial molecular mass [kg/kmol]
+RfireInit       = Runiv/mbarFireInit                        # combustion products' initial specific gas constant [J/kgK]
+Pambient        = atm                                       # ambient pressure [Pa]
 
 # Nozzle and chamber
 
@@ -106,9 +121,9 @@ ToxPresStart    = 293                   # Ox pressurant (=nitrogen) temp [K]
 PoxPrestankStart  = 3000*psi            # Ox pressurant tank pressure [Pa]
 
 ToxStart        = 90                    # Oxidizer (LOX) temp [K] 
-PoxtankStart    = Preg                  # Oxidizer tank pressure [Pa]
+PoxtankStart    = Preg_ox               # Oxidizer tank pressure [Pa]
 TfuelStart      = 293                   # Fuel temp [K]
-PfueltankStart  = Preg                  # Fuel tank pressure [Pa]
+PfueltankStart  = Preg_fu               # Fuel tank pressure [Pa]
 
 FFoxtankStart   = 0.5                   # oxidizer tank fill fraction, dimensionless
 FFfueltankStart = 0.5                   # fuel tank fill fraction (Vfuel/Vtank)
@@ -122,9 +137,9 @@ LOX             = rc.LOXFluid()
 nozzle          = rc.ConvergingDivergingNozzle(A_nozzleExit, A_nozzleThroat)
 chamber         = rc.LOX_IPACombustionChamber(nozzle, Vchamber, TfireInit, ga, mbarFireInit, Pfire, atm)
 
-#initialize injector orifices
-ox_orifice      = rc.LiquidOrifice(area_oxInjector, cd_oxInjector )
-fuel_orifice    = rc.LiquidOrifice(area_fuelInjector, cd_fuelInjector )
+#initialize injector
+fuel_pintle     = rc.MagnumFuelPintle(d_in_fu, d_mani_fu, ID_shaft, OD_shaft, L_shaft_fu, r_tip, h_exit, rou_fu)
+ox_pintle       = rc.MagnumOxPintle(d_in_ox, d_mani_ox, d_ori, OD_ann, ID_ann, L_shaft_ox, Nori, cd_ori, rou_ox) 
 
 #initialize pressurant tanks
 oxprestank      = rc.IdealgasTank(nitrogen, Vprestank, ToxPresStart, PoxPrestankStart)
@@ -132,9 +147,9 @@ fuelprestank    = rc.IdealgasTank(nitrogen, Vprestank, TfuelPresStart, PfuelPres
 
 #initialize propellant tanks
 oxtank          = rc.LiquidPropellantTank(nitrogen, LOX, Voxtank, ToxStart, ToxPresStart,\
-                    PoxtankStart, FFoxtankStart, Preg)
+                    PoxtankStart, FFoxtankStart, Preg_ox)
 fueltank        = rc.LiquidPropellantTank(nitrogen, IPA, Vfueltank, TfuelStart, TfuelPresStart,\
-                    PfueltankStart, FFfueltankStart, Preg)
+                    PfueltankStart, FFfueltankStart, Preg_fu)
 
 #initialize vent holes
 fuelVent        = rc.VentHole(d_fueltank_vent, nitrogen.gamma, Runiv/nitrogen.mbar, fuel_vent_cd)
@@ -260,10 +275,10 @@ for i in range(0,2000):
     Pchamb          = Pchamber[i]
     mu_ox           = LOX.mu
     mu_fuel         = IPA.mu 
-    mu_N2_ox        = nitrogen.getViscosity(Preg, Toxtank[i])
-    roo_N2_ox       = nitrogen.getDensity(Preg, Toxtank[i])
-    mu_N2_fuel      = nitrogen.getViscosity(Preg, Tfueltank[i])
-    roo_N2_fuel     = nitrogen.getDensity(Preg, Tfueltank[i])
+    mu_N2_ox        = nitrogen.getViscosity(Preg_ox, Toxtank[i])
+    roo_N2_ox       = nitrogen.getDensity(Preg_ox, Toxtank[i])
+    mu_N2_fuel      = nitrogen.getViscosity(Preg_fu, Tfueltank[i])
+    roo_N2_fuel     = nitrogen.getDensity(Preg_fu, Tfueltank[i])
     
     Pcrit_ox        = LOX.P_crit
     Pvapor_ox       = LOX.P_vapor
@@ -334,8 +349,8 @@ for i in range(0,2000):
         #print("mdot as U2 is", mdot, "kg/s")
         
         out             = [ mdot - oxSole.getMdot(P2ox, P3, rooOx, Pcrit_ox, Pvapor_ox) ]
-        out.append( P3 - P4 - ox_tube.getPressureDrop(mdot, mu_ox, rooOx) )
-        out.append( P4 - Pchamb - ox_orifice.getPressureDrop(mdot, rooOx) )
+        out.append( P3 - P4 - ox_tube.getPressureDrop(mdot, mu_ox, rooOx))
+        out.append( P4 - Pchamb - ox_pintle.getPressureDrops(mdot, rooOx, mu_ox, 0*psi)[-1] )
         #print("oxoutti", out)
         return out
     
@@ -359,7 +374,7 @@ for i in range(0,2000):
         out             = [ mdot - fuelSole.getMdot(P2fuel, P3, rooFuel, IPA.P_crit, IPA.P_vapor)  ]
         out.append( P3 - P4 - fuel_tube.getPressureDrop(mdot, mu_fuel, rooFuel) )
         out.append( P4 - P5 - jacket.getPressureDrop(mdot) ) 
-        out.append( P5 - Pchamb - fuel_orifice.getPressureDrop(mdot, rooFuel) )
+        out.append( P5 - Pchamb - fuel_pintle.getPressureDrops(mdot, rooFuel, mu_fuel, 0*psi)[-1] )
         
         #print("fueloutti", out)
         return out
@@ -373,8 +388,8 @@ for i in range(0,2000):
     fueltank.update(TfuelPres[i], 0, mdot_fuel_new, timestep) 
     
     # Get pressurant mass flow rates in:
-    mdot_ox_pres_new    = presox_tube.getMdot(Preg, oxtank.getPtank(), mu_N2_ox, roo_N2_ox)
-    mdot_fuel_pres_new  = presfuel_tube.getMdot(Preg, fueltank.getPtank(), mu_N2_fuel, roo_N2_fuel)
+    mdot_ox_pres_new    = presox_tube.getMdot(Preg_ox, oxtank.getPtank(), mu_N2_ox, roo_N2_ox)
+    mdot_fuel_pres_new  = presfuel_tube.getMdot(Preg_fu, fueltank.getPtank(), mu_N2_fuel, roo_N2_fuel)
     
     # Determine final conditions in prop tanks
     oxtank.update(ToxPres[i], mdot_ox_pres_new, 0, timestep)
@@ -483,29 +498,60 @@ for i in range(0,2000):
     
     i+=1
     
-# Print some values
+# Evaluate and Print some values
+
+Vinj_ox     = ox_pintle.getVelocities(mdot_ox[-1], rooOx, mu_ox)[-1]               # Ox injection velocity, m/s
+Vinj_fu     = fuel_pintle.getVelocities(mdot_fuel[-1], rooFuel, mu_fuel)[-1]       # Fuel injection velocity, m/s
+fire        = chamber.get_Tfire(1.5, 2e6)
 
 print("")
-print("mdot_nozzle steady state is", '%.3f'%mdot_nozzle[-1], "kg/s")
-print("SS thrust is", '%.1f'%Thrust[-1], "N")
-print("SS Isp is", '%.1f'%Isp[-1], "s")
-print("SS T_chamber is",'%.1f'%T_chamber[-1], "K")
-print("SS P_chamber is", '%.1f'%(Pchamber[-1]/psi), "psi")
-print("SS P_exit is", '%.3f'%(Pexit[-1]/atm), "atm")
+print("mdot_nozzle steady state is",            '%.3f'%mdot_nozzle[-1], "kg/s")
+print("SS thrust is",                           '%.1f'%Thrust[-1], "N")
+print("SS Isp is",                              '%.1f'%Isp[-1], "s")
+print("SS T_chamber is",                        '%.1f'%T_chamber[-1], "K")
+print("SS P_chamber is",                        '%.1f'%(Pchamber[-1]/psi), "psi")
+print("SS P_exit is",                           '%.3f'%(Pexit[-1]/atm), "atm")
 print("SS thrust coeff is", '%.3f'%nozzle.getCf(Pchamber[-1], atm, chamber.get_gamma(OFratio[-1],Pchamber[-1] )) )
-print("SS mdot_N2_fuel is", '%.3f'%mdot_fuel_pres[-1], "kg/s")
-print("SS mdot_N2_ox is", '%.3f'%mdot_ox_pres[-1], "kg/s")
-print("SS N2_fuel flow rate is", '%.3f'%(mdot_fuel_pres[-1]/roo_N2_fuel*1000/3.78*60), "GPM")
-print("SS N2_ox flow rate is", '%.3f'%(mdot_ox_pres[-1]/roo_N2_ox*1000/3.78*60), "GPM")
-print("SS mdot_ox is", '%.3f'%mdot_ox[-1], "kg/s")
-print("SS mdot_fuel is", '%.3f'%mdot_fuel[-1], "kg/s")
-print("SS O/F ratio is", '%.3f'%OFratio[-1])
-print("SS ox tube velocity is", '%.1f'%(mdot_ox[-1]/(rooOx*pi*d_oxtube**2/4)), "m/s")
-print("SS fuel tube velocity is", '%.1f'%(mdot_fuel[-1]/(rooFuel*pi*d_fueltube**2/4)), "m/s")
-print("SS ox injection velocity is", '%.1f'%(mdot_ox[-1]/(rooOx*pi*diameter_oxInjectorHoles**2/4*numOxInjectorHoles)), "m/s")
-print("SS fuel injection velocity is", '%.1f'%(mdot_fuel[-1]/(rooFuel*pi*diameter_fuelInjectorHoles**2/4*numFuelHoles)), "m/s")
-print("SS ox injector P_drop", '%.1f'%((P4ox[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
-print("SS fuel injector P_drop", '%.1f'%((P5fuel[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
+print("SS mdot_N2_fuel is",                     '%.3f'%mdot_fuel_pres[-1], "kg/s")
+print("SS mdot_N2_ox is",                       '%.3f'%mdot_ox_pres[-1], "kg/s")
+print("SS N2_fuel flow rate is",                '%.3f'%(mdot_fuel_pres[-1]/roo_N2_fuel*1000/3.78*60), "GPM")
+print("SS N2_ox flow rate is",                  '%.3f'%(mdot_ox_pres[-1]/roo_N2_ox*1000/3.78*60), "GPM")
+print("SS mdot_ox is",                          '%.3f'%mdot_ox[-1], "kg/s")
+print("SS mdot_fuel is",                        '%.3f'%mdot_fuel[-1], "kg/s")
+print("SS O/F ratio is",                        '%.3f'%OFratio[-1])
+print("SS ox tube velocity is",                 '%.1f'%(mdot_ox[-1]/(rooOx*pi*d_oxtube**2/4)), "m/s")
+print("SS fuel tube velocity is",               '%.1f'%(mdot_fuel[-1]/(rooFuel*pi*d_fueltube**2/4)), "m/s")
+print("SS ox injection velocity is",            '%.1f'%(Vinj_ox), "m/s")
+print("SS fuel injection velocity is",          '%.1f'%(Vinj_fu), "m/s")
+print("Momentum ratio is", '%.3f'%(Vinj_fu*mdot_fuel[-1]/(Vinj_ox*mdot_ox[-1])))
+print("SS ox injector P_drop is",               '%.1f'%((P4ox[-1]-Pchamber[-1])/psi), "psi, ie.", '%.1f'%((P4ox[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
+print("SS fuel injector P_drop",                '%.1f'%((P5fuel[-1]-Pchamber[-1])/psi), "psi,ie, "'%.1f'%((P5fuel[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
+
+
+print("")
+print("bend drop in fuel inj is", '%.1f'%(fuel_pintle.getPressureDrops(mdot_fuel[-1], rooFuel,mu_fuel, 0*psi)[3]/psi), "psi")
+print("fuel injector k_bend =", '%.3f'%( fuel_pintle.get_kbend(fuel_pintle.OD_shaft, mdot_fuel[-1])))
+print("")
+print("Pinj_in_fuel is", '%.1f'%(fuel_pintle.getPressures(mdot_fuel[-1], rooFuel,mu_fuel, P5fuel[-1])[0]/psi), "psi")
+print("Pfuel_manifold is", '%.1f'%(fuel_pintle.getPressures(mdot_fuel[-1], rooFuel,mu_fuel, P5fuel[-1])[1]/psi), "psi")
+print("Pfuel_annulus_in is", '%.1f'%(fuel_pintle.getPressures(mdot_fuel[-1], rooFuel,mu_fuel, P5fuel[-1])[2]/psi), "psi")
+print("Pfuel_annulus_out is", '%.1f'%(fuel_pintle.getPressures(mdot_fuel[-1], rooFuel,mu_fuel, P5fuel[-1])[3]/psi), "psi")
+print("Pfuel_bend_exit is", '%.1f'%(fuel_pintle.getPressures(mdot_fuel[-1], rooFuel,mu_fuel, P5fuel[-1])[4]/psi), "psi")
+print("")
+print("Pinj_in_ox is", '%.1f'%(ox_pintle.getPressures(mdot_ox[-1], rooOx,mu_ox, P4ox[-1])[0]/psi), "psi")
+print("Pox_manifold is", '%.1f'%(ox_pintle.getPressures(mdot_ox[-1], rooOx,mu_ox, P4ox[-1])[1]/psi), "psi")
+print("Pox_converging_in is", '%.1f'%(ox_pintle.getPressures(mdot_ox[-1], rooOx,mu_ox, P4ox[-1])[2]/psi), "psi")
+print("Pox_annulus_in is", '%.1f'%(ox_pintle.getPressures(mdot_ox[-1], rooOx,mu_ox, P4ox[-1])[3]/psi), "psi")
+print("Pox_annulus_exit is", '%.1f'%(ox_pintle.getPressures(mdot_ox[-1], rooOx,mu_ox, P4ox[-1])[4]/psi), "psi")
+print("")
+print("v_fuel_manifold is", '%.2f'%fuel_pintle.getVelocities(mdot_fuel[-1], rooFuel,mu_fuel)[1], "m/s")
+print("v_fuel_annulus is", '%.2f'%fuel_pintle.getVelocities(mdot_fuel[-1], rooFuel,mu_fuel)[2], "m/s")
+print("v_fuel_injection is", '%.2f'%fuel_pintle.getVelocities(mdot_fuel[-1], rooFuel,mu_fuel)[3], "m/s")
+print("")
+print("v_ox_manifold is", '%.2f'%ox_pintle.getVelocities(mdot_ox[-1], rooOx, mu_ox)[1], "m/s")
+print("v_ox_ori is", '%.2f'%ox_pintle.getVelocities(mdot_ox[-1], rooOx, mu_ox)[2], "m/s")
+print("v_ox_manifold after orifices is", '%.2f'%ox_pintle.getVelocities(mdot_ox[-1], rooOx, mu_ox)[3], "m/s")
+print("v_ox_injection", '%.2f'%ox_pintle.getVelocities(mdot_ox[-1], rooOx, mu_ox)[4], "m/s")
 
 # following time histories are one element shorter than the rest, so the last calculated value will be duplicated to match the length of other time histories.
 

@@ -7,55 +7,193 @@ from numpy import sqrt, pi, exp, log, log10
 from scipy import interpolate
 import scipy.optimize as opt
 import numpy as np
+import Moody_diagram
+
 
 class MagnumOxPintle:
-    
+
     # References to Fluid Mechanics by Frank M. White, 7th edition
     
-    def __init__(self, d_in, d2, d_ori, d4, d_shaft, L_shaft, Nori, cd_ori, rou):
+    def __init__(self, d_in, d_mani, d_ori, OD_ann, ID_ann, L_shaft, Nori, cd_ori, rou):
         
-        self.d_in   = d_in                      # injector inlet diameter (two inlets!)
-        self.d2     = d2                        # circulation chamber diameter upstream from orifice plate
-        self.d4     = d4                        # converging section end/annulus outer diameter, m
-        self.d_shaft= d_shaft                   # central shaft outer diameter, m
+        self.d_in   = d_in                      # injector inlet diameter
+        self.d_mani = d_mani                    # circulation chamber diameter upstream from orifice plate
+        self.OD_ann = OD_ann                    # converging section end/annulus outer diameter, m
+        self.ID_ann = ID_ann                    # central shaft outer diameter, m
         self.L_shaft= L_shaft                   # Length of annular flow path, m
         self.Nori   = Nori                      # number of orifices in orifice plate
         self.d_ori  = d_ori                     # single orifice diameter, m
-        self.cd_ori = cd_ori                    # orifice diameter in orifice plate, m
-        self.Dh     = self.d4 - self.d_shaft    # hydraulic diameter in annulus, m
-        self.rou    = rou/self.Dh               # annulus material _DIMENSIONLESS_ roughness
-        
-    def getPressureDrop(self, mdot, rho, mu):
-        
-        v1      = 4*mdot/(rho*pi*self.d_in**2)/2                # velocity in feed lines (two of them!), m/s
-        v2      = 4*mdot/(rho*pi*(self.d2**2-self.d_shaft**2))  # velocity in circulation chamber upstream of orifices, m/s
-        v_ori   = 4*mdot/(rho*pi*self.d_ori**2)                 # velocity in orifices, m/s
+        self.cd_ori = cd_ori                    # orifice discharge coefficient in orifice plate, dimensionless
+        self.Dh     = self.OD_ann - self.ID_ann # annulus hydraulic diameter, m
+        self.rou    = rou                       # annulus _DIMENSIONLESS_ roughness
+    
+    def getVelocities(self, mdot, rho, mu):
+    
+        v1      = 4*mdot/(rho*pi*self.d_in**2)                  # velocity in feed lines, m/s
+        v2      = 4*mdot/(rho*pi*(self.d_mani**2-self.ID_ann**2))  # velocity in circulation chamber upstream of orifices, m/s
+        v_ori   = 4*mdot/(rho*pi*self.d_ori**2*self.Nori)       # velocity in orifices, m/s
         v3      = v2                                            # velocity downstream of orifices, m/s
-        v4      = 4*mdot/(rho*pi*(self.d4**2-self.d_shaft**2))  # velocity in final annulus around the shaft, m/s
+        v4      = 4*mdot/(rho*pi*(self.OD_ann**2-self.ID_ann**2))  # velocity in annulus around the shaft, m/s
+       
+        return (v1, v2, v_ori, v3, v4)
+        
+    def getPressureDrops(self, mdot, rho, mu, Pin): #Pin needed only for diagnostic purposes
+    
+        (v1, v2, v_ori, v3, v4) = self.getVelocities(mdot, rho, mu)
         
         A_ori   = pi*self.d_ori**2/4                            # single orifice cross sectional area, m
         
-        Re      = rho*v4*Dh/mu                                  # Reynold's number in annulus, dimensionless
-        ksi     = 1/0.67                        # correction factor for turbulent flow in thin annulus, White p.385
-        Re_eff  = Re/ksi                                        # effective Reynold's number in annular flow
-        rou_eff = rou*ksi                                       # effective surface roughness in annular flow, dimensionless
+        Re      = rho*v4*self.Dh/mu                             # Reynold's number in annulus, dimensionless
+        f       = Moody_diagram.getAnnularF(Re, self.OD_ann, self.ID_ann, mu, v3, self.rou)
+        alfa_t  = 1                                             # turbulent correction factor, see White p.191
+        
+        dp1     = 0.5*rho*alfa_t*(v2**2 - v1**2)                # velocity loss going from feedlines to circ. chamber, Pa
+        dp2     = (mdot/self.Nori)**2/(2*rho*A_ori**2*self.cd_ori**2) \
+                    - 0.5*rho*alfa_t*(v_ori**2 - v3**2)         # unrecoverable pressure drop in orifices, Pa
+        dp3     = 0.5*rho*alfa_t*(v4**2 - v3**2)                # velocity loss in converging section, Pa
+        dp4     = 0.5*rho*v4**2*f*self.L_shaft/self.Dh          # friction losses in the annulus, Pa
+        
+        '''
+        print("")
+        print("P_inlet is", '%.1f'%(Pin/psi), "psi")
+        print("dp1 (feedline to manifold) is", '%.1f'%(dp1/psi), "psi")
+        print("P_ox_manifold is", '%.1f'%((Pin-dp1)/psi), "psi")
+        print("dp2 (orifice loss) is", '%.1f'%(dp2/psi), "psi")
+        print("P_converging_in is", '%.1f'%((Pin-dp1-dp2)/psi), "psi")
+        print("dp3 (velocity losses in converging section) is", '%.1f'%(dp3/psi), "psi")
+        print("P_annulus_in is", '%.1f'%((Pin-dp1-dp2-dp3)/psi), "psi")
+        print("dp4 (friction losses in annulus) is", '%.1f'%(dp4/psi), "psi")
+        print("P_chamber_ox is", '%.1f'%((Pin-dp1-dp2-dp3-dp4)/psi), "psi")
+        print("")
+        print("v_feedline_ox is", '%.3f'%(v1), "m/s")
+        print("v2_ox is", '%.3f'%(v2), "m/s")
+        print("v_ori is", '%.3f'%(v_ori), "m/s")
+        print("v3_ox is", '%.3f'%(v3), "m/s")
+        print("v4_annulus_ox is", '%.3f'%(v4), "m/s")
+        print("")
+        '''
+        return (dp1, dp2, dp3, dp4, dp1 + dp2 + dp3 + dp4)
+        
+    def getPressures(self, mdot, rho, mu, Pin):
+        
+        (dp1, dp2, dp3, dp4, dpTot)   = self.getPressureDrops(mdot, rho, mu, Pin)
+        P1          = Pin - dp1                         # Ox manifold
+        P2          = P1 - dp2                          # Converging section in (after orifices)
+        P3          = P2 - dp3                          # Annulus inlet
+        P4          = P3 - dp4                          # Annulus outlet
+        
+        return (Pin, P1, P2, P3, P4)
 
-        C1      = (-2.457*log( (7/Re_eff)**0.9 + 0.27*rou_eff) )**16
-        C2      = (37530/Re_eff)**16
-        f      = 8*( (8/Re_eff)**12 + (C1+C2)**-1.5 )**(1/12)   # Darcy-Weisbach friction factor, dimensionless
-        print("f is", f)
         
+class MagnumFuelPintle:
+    
+    # References to Fluid Mechanics by Frank M. White, 7th edition
+    
+    def __init__(self, d_in, d2, ID_shaft, OD_shaft, L_shaft, r_tip, h_exit, rou):
         
-        dp1     = 0.5*rho*alfa_t*(v2**2 - v1**2)                # only velocity loss going from feedlines to circ. chamber, Pa
-        dp2     = (mdot/Nori)**2/(2*rho*A_ori**2*self.cd_ori**2) \
-                    - 0.5*rho*alfa_t*(v_ori**2 - v3**2)         # pressure drop in orifices, Pa
-        dp3     = 0.5*rho*alfa_t*(v4**2 - v3**2)                # only velocity loss in converging section, Pa
-        dp4     = 0.5*rho*v4**2*f*self.L_shaft/self.Dh          # only friction losses in the annulus, Pa
+        self.d_in   = d_in                                      # injector inlet diameter
+        self.d2     = d2                                        # manifold/converging section begin diameter, m
+        self.ID_shaft= ID_shaft                                 # fuel annulus ID, m
+        self.OD_shaft= OD_shaft                                 # fuel annulus OD, m
+        self.L_shaft= L_shaft                                   # Length of annular flow path, m
+        self.r_tip  = r_tip                                     # pintle tip radius, m
+        self.h_exit = h_exit                                    # pintle exit slot height, m
+        self.Dh     = self.OD_shaft - self.ID_shaft             # annulus hydraulic diameter, m
+        self.rou    = rou                                       # annulus _DIMENSIONLESS_ roughness]
         
+        # Interpolation of k_bend from COMSOL data (x-coord= OD, y-coord= mdot). r_inside = 1.5mm
+        # (extarpolation = assumes closest valid data point)
         
-        return dp1 + dp2 + dp3 +dp4
+        ODmin,ODmax         = 14e-3, 17e-3      # Fuel annulus OD,m
+        ODstep              = 1e-3              # m
+        mdot_min, mdot_max  = 0.5, 2.5          # kg/s 
+        mdot_step           = 0.5               # kg/s
 
-
+        OD_vector           = np.linspace(ODmin,ODmax,(ODmax-ODmin)/ODstep+1)
+        mdot_vector         = np.linspace(mdot_min,mdot_max,(mdot_max-mdot_min)/mdot_step+1)
+        
+        #print("OD_vec is", OD_vector)
+        #print("mdot_vec is", mdot_vector)
+        
+        kbend_grid = np.array([[1.2838, 1.3038, 1.2904, 1.28],
+        [ 1.0860, 1.1604, 1.1840, 1.27],
+        [ 0.9514, 1.0375, 1.0902, 1.15],
+        [ 0.8860, 0.9648, 1.0150, 1.10],
+        [ 0.7860, 0.9204, 0.9567, 1.01]])
+        
+        
+        self.kbend_int      = interpolate.RectBivariateSpline(mdot_vector, OD_vector, kbend_grid)     # Note the order of X&Y!
+     
+    def get_kbend(self, mdot, OD):
+        '''
+        if mdot < 0.5:
+            print("mdot_fuel out of CFD bounds (<0.5kg/s)")
+            return 1.5
+        elif mdot > 2.5:
+            print("mdot_fuel out of CFD bounds (>2.5kg/s)")
+            return 0.9
+        else:
+        '''
+        return self.kbend_int.ev(OD, mdot)
+       
+    def getVelocities(self, mdot, rho, mu):
+    
+        v1      = 4*mdot/(rho*pi*self.d_in**2)/2                        # velocity in feed lines (two of them!), m/s
+        v2      = 4*mdot/(rho*pi*(self.d2**2-self.ID_shaft**2))         # velocity in manifold, m/s
+        v3      = 4*mdot/(rho*pi*(self.OD_shaft**2-self.ID_shaft**2))   # velocity in shaft, m/s
+        v4      = mdot/(rho*2*pi*self.r_tip*self.h_exit)                # exit velocity, m/s
+       
+        return (v1, v2, v3, v4)
+        
+    def getPressureDrops(self, mdot, rho, mu, Pin): #Pin needed only for diagnostic purposes
+        
+        (v1, v2, v3, v4) = self.getVelocities(mdot, rho, mu)    # velocities at different stations, m/s
+        
+        Re      = rho*v4*self.Dh/mu                             # Reynold's number in annulus, dimensionless
+        f       = Moody_diagram.getAnnularF(Re, self.OD_shaft, self.ID_shaft, mu, v3, self.rou)
+        alfa_t  = 1                                             # turbulent correction factor, see White p.191
+        k_bend  = self.get_kbend(self.OD_shaft, mdot)           # bend drop coefficient, dimensionless
+        
+        dp1     = 0.5*rho*alfa_t*(v2**2 - v1**2)                # velocity loss going from feedlines to manifold, Pa
+        dp2     = 0.5*rho*alfa_t*(v3**2 - v2**2)                # velocity loss going from manifold to annulus, Pa
+        dp3     = 0.5*rho*v3**2*f*self.L_shaft/self.Dh          # friction losses in the annulus, Pa
+        dp4     = 0.5*rho*v3**2*k_bend                          # unrecoverable losses in the bend, Pa
+        dp5     = 0.5*rho*alfa_t*(v4**2 - v3**2)                # velocity loss in the bend, Pa
+        
+        '''
+        print("P_inlet is", '%.1f'%(Pin/psi), "psi")
+        print("dp1 (feedline to manifold) is", '%.1f'%(dp1/psi), "psi")
+        print("P_manifold is", '%.1f'%((Pin-dp1)/psi), "psi")
+        print("dp2 (from manifold to annulus) is", '%.1f'%(dp2/psi), "psi")
+        print("P_annulus_in is", '%.1f'%((Pin-dp1-dp2)/psi), "psi")
+        print("dp3 (friction losses in annulus) is", '%.1f'%(dp3/psi), "psi")
+        print("P_annulus_out is", '%.1f'%((Pin-dp1-dp2-dp3)/psi), "psi")
+        print("dp4 (bend losses) is", '%.1f'%(dp4/psi), "psi")
+        print("dp5 (velocity losses in the bend) is", '%.1f'%(dp5/psi), "psi")
+        print("P_chamber_fuel is", '%.1f'%((Pin-dp1-dp2-dp3-dp4-dp5)/psi), "psi")
+        print("")
+        print("v1_fuel is", '%.1f'%(v1), "m/s")
+        print("v2_fuel is", '%.1f'%(v2), "m/s")
+        print("v3_fuel is", '%.1f'%(v3), "m/s")
+        print("v4_fuel is", '%.1f'%(v3), "m/s")
+        print("v_exit_fuel is", '%.1f'%(v4), "m/s")
+        print("")
+        print("")
+        '''
+        
+        return (dp1, dp2, dp3, dp4, dp5, dp1 + dp2 + dp3 + dp4 + dp5)
+        
+    def getPressures(self, mdot, rho, mu, Pin):
+        
+        (dp1, dp2, dp3, dp4, dp5, dpTot)   = self.getPressureDrops(mdot, rho, mu, Pin)
+        P1          = Pin - dp1                         # Fuel manifold
+        P2          = P1 - dp2                          # Annulus inlet
+        P3          = P2 - dp3                          # Annulus outlet
+        P4          = P3 - dp4 -dp5                     # Bend exit
+        
+        return (Pin, P1, P2, P3, P4)
+        
+        
 class GasOrifice:
     def __init__(self, A, Cd, gamma, Rgas):
         self.A      = A
@@ -284,7 +422,7 @@ class LOX_IPACombustionChamber:
         self.gamma  = gammaFire
         self.Pa     = Pambient
         
-        # Interpolation of Tfire, mbar, and gamma from CEA data
+        # Interpolation of Tfire, mbar, and gamma from CEA data (extarpolation = assumes closest valid data point)
         pmin,pmax       = 100*psi,500*psi   # psi
         pstep           = 100*psi           # psi
         OFmin, OFmax    = 0.5, 2            # dimensionless 
@@ -292,6 +430,7 @@ class LOX_IPACombustionChamber:
 
         p_vector        = np.linspace(pmin,pmax,(pmax-pmin)/pstep+1)
         OF_vector       = np.linspace(OFmin,OFmax,(OFmax-OFmin)/OFstep+1)
+        
 
         T_grid = np.array([[ 1115, 1160, 1188, 1209, 1225],
        [ 1162, 1211, 1241, 1264 ,1282],
@@ -306,6 +445,7 @@ class LOX_IPACombustionChamber:
        [ 3193, 3273, 3319, 3352, 3377],
        [ 3221, 3306, 3356, 3392, 3420],
        [ 3235, 3324, 3376, 3413, 3442]])
+       
        
         MW_grid = np.array([[14.15, 14.48, 14.70, 14.87, 15.01],
        [ 14.91, 15.15, 15.30, 15.41, 15.50],
@@ -785,7 +925,7 @@ class Kerosene:
 class IPAFluid:
     
     def __init__(self):
-        self.density = 780              # kg/m3
+        self.density = 786              # kg/m3
         self.P_crit  = 5.37e6           # Pa
         self.P_vapor = 7000             # Pa, at 300K
         self.mu      = 2.5e-3             # Pas = Ns/m2, at 440psi & ?? K 
