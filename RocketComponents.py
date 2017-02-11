@@ -2,7 +2,7 @@
 #@ Authors Juha Nieminen & Alexander Adams
 
 import Flows1D
-from physical_constants import Runiv, psi, lbm
+from physical_constants import Runiv, psi, lbm, atm
 from numpy import sqrt, pi, exp, log, log10
 from scipy import interpolate
 import scipy.optimize as opt
@@ -29,11 +29,11 @@ class MagnumOxPintle:
     
     def getVelocities(self, mdot, rho, mu):
     
-        v1      = 4*mdot/(rho*pi*self.d_in**2)                  # velocity in feed lines, m/s
-        v2      = 4*mdot/(rho*pi*(self.d_mani**2-self.ID_ann**2))  # velocity in circulation chamber upstream of orifices, m/s
-        v_ori   = 4*mdot/(rho*pi*self.d_ori**2*self.Nori)       # velocity in orifices, m/s
-        v3      = v2                                            # velocity downstream of orifices, m/s
-        v4      = 4*mdot/(rho*pi*(self.OD_ann**2-self.ID_ann**2))  # velocity in annulus around the shaft, m/s
+        v1      = 4*mdot/(rho*pi*self.d_in**2)                      # velocity in feed lines, m/s
+        v2      = 4*mdot/(rho*pi*(self.d_mani**2-self.ID_ann**2))   # velocity in circulation chamber upstream of orifices,m/s
+        v_ori   = 4*mdot/(rho*pi*self.d_ori**2*self.Nori)           # velocity in orifices, m/s
+        v3      = v2                                                # velocity downstream of orifices, m/s
+        v4      = 4*mdot/(rho*pi*(self.OD_ann**2-self.ID_ann**2))   # velocity in annulus around the shaft, m/s
        
         return (v1, v2, v_ori, v3, v4)
         
@@ -91,29 +91,26 @@ class MagnumFuelPintle:
     
     def __init__(self, d_in, d2, ID_shaft, OD_shaft, L_shaft, r_tip, h_exit, rou):
         
-        self.d_in   = d_in                                      # injector inlet diameter
-        self.d2     = d2                                        # manifold/converging section begin diameter, m
-        self.ID_shaft= ID_shaft                                 # fuel annulus ID, m
-        self.OD_shaft= OD_shaft                                 # fuel annulus OD, m
-        self.L_shaft= L_shaft                                   # Length of annular flow path, m
-        self.r_tip  = r_tip                                     # pintle tip radius, m
-        self.h_exit = h_exit                                    # pintle exit slot height, m
-        self.Dh     = self.OD_shaft - self.ID_shaft             # annulus hydraulic diameter, m
-        self.rou    = rou                                       # annulus _DIMENSIONLESS_ roughness]
+        self.d_in           = d_in                                      # injector inlet diameter (two of them!)
+        self.d2             = d2                                        # manifold/converging section begin diameter, m
+        self.ID_shaft       = ID_shaft                                  # fuel annulus ID, m
+        self.OD_shaft       = OD_shaft                                  # fuel annulus OD, m
+        self.L_shaft        = L_shaft                                   # Length of annular flow path, m
+        self.r_tip          = r_tip                                     # pintle tip radius, m
+        self.h_exit         = h_exit                                    # pintle exit slot height, m
+        self.Dh             = self.OD_shaft - self.ID_shaft             # annulus hydraulic diameter, m
+        self.rou            = rou                                       # annulus _DIMENSIONLESS_ roughness]
         
         # Interpolation of k_bend from COMSOL data (x-coord= OD, y-coord= mdot). r_inside = 1.5mm
-        # (extarpolation = assumes closest valid data point)
+        # (extrapolation = assumes closest valid data point)
         
-        ODmin,ODmax         = 14e-3, 17e-3      # Fuel annulus OD,m
-        ODstep              = 1e-3              # m
-        mdot_min, mdot_max  = 0.5, 2.5          # kg/s 
-        mdot_step           = 0.5               # kg/s
+        ODmin,ODmax         = 14e-3, 17e-3                              # Fuel annulus OD,m
+        ODstep              = 1e-3                                      # m
+        mdot_min, mdot_max  = 0.5, 2.5                                  # kg/s 
+        mdot_step           = 0.5                                       # kg/s
 
         OD_vector           = np.linspace(ODmin,ODmax,(ODmax-ODmin)/ODstep+1)
         mdot_vector         = np.linspace(mdot_min,mdot_max,(mdot_max-mdot_min)/mdot_step+1)
-        
-        #print("OD_vec is", OD_vector)
-        #print("mdot_vec is", mdot_vector)
         
         kbend_grid = np.array([[1.2838, 1.3038, 1.2904, 1.28],
         [ 1.0860, 1.1604, 1.1840, 1.27],
@@ -125,15 +122,7 @@ class MagnumFuelPintle:
         self.kbend_int      = interpolate.RectBivariateSpline(mdot_vector, OD_vector, kbend_grid)     # Note the order of X&Y!
      
     def get_kbend(self, mdot, OD):
-        '''
-        if mdot < 0.5:
-            print("mdot_fuel out of CFD bounds (<0.5kg/s)")
-            return 1.5
-        elif mdot > 2.5:
-            print("mdot_fuel out of CFD bounds (>2.5kg/s)")
-            return 0.9
-        else:
-        '''
+        
         return self.kbend_int.ev(OD, mdot)
        
     def getVelocities(self, mdot, rho, mu):
@@ -147,18 +136,18 @@ class MagnumFuelPintle:
         
     def getPressureDrops(self, mdot, rho, mu, Pin): #Pin needed only for diagnostic purposes
         
-        (v1, v2, v3, v4) = self.getVelocities(mdot, rho, mu)    # velocities at different stations, m/s
+        (v1, v2, v3, v4) = self.getVelocities(mdot, rho, mu)            # velocities at different stations, m/s
         
-        Re      = rho*v4*self.Dh/mu                             # Reynold's number in annulus, dimensionless
+        Re      = rho*v4*self.Dh/mu                                     # Reynold's number in annulus, dimensionless
         f       = Moody_diagram.getAnnularF(Re, self.OD_shaft, self.ID_shaft, mu, v3, self.rou)
-        alfa_t  = 1                                             # turbulent correction factor, see White p.191
-        k_bend  = self.get_kbend(self.OD_shaft, mdot)           # bend drop coefficient, dimensionless
+        alfa_t  = 1                                                     # turbulent correction factor, see White p.191
+        k_bend  = self.get_kbend(self.OD_shaft, mdot)                   # bend drop coefficient, dimensionless
         
-        dp1     = 0.5*rho*alfa_t*(v2**2 - v1**2)                # velocity loss going from feedlines to manifold, Pa
-        dp2     = 0.5*rho*alfa_t*(v3**2 - v2**2)                # velocity loss going from manifold to annulus, Pa
-        dp3     = 0.5*rho*v3**2*f*self.L_shaft/self.Dh          # friction losses in the annulus, Pa
-        dp4     = 0.5*rho*v3**2*k_bend                          # unrecoverable losses in the bend, Pa
-        dp5     = 0.5*rho*alfa_t*(v4**2 - v3**2)                # velocity loss in the bend, Pa
+        dp1     = 0.5*rho*alfa_t*(v2**2 - v1**2)                        # velocity loss going from feedlines to manifold, Pa
+        dp2     = 0.5*rho*alfa_t*(v3**2 - v2**2)                        # velocity loss going from manifold to annulus, Pa
+        dp3     = 0.5*rho*v3**2*f*self.L_shaft/self.Dh                  # friction losses in the annulus, Pa
+        dp4     = 0.5*rho*v3**2*k_bend                                  # unrecoverable losses in the bend, Pa
+        dp5     = 0.5*rho*alfa_t*(v4**2 - v3**2)                        # velocity loss in the bend, Pa
         
         '''
         print("P_inlet is", '%.1f'%(Pin/psi), "psi")
@@ -706,7 +695,9 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
         n           = 2.73                                  # dimensionless experimental/unit correction factor
         
         if self.Fgamma*self.xT <= (Pin-Pout)/Pin:
-            print("Warning: solenoid flow is choked")
+            print("Pin_gassole is", Pin/psi, "psi")
+            print("Pout_gassole is", Pout/psi, "psi")
+            print("Warning: gas solenoid flow is choked")
             Y       = 0.667                                             # choked comperessibility factor
             return self.Cv*n*Y*sqrt(self.Fgamma*self.xT*Pin/1000*roo_in)# mass flow rate [kg/s], eq.12
         else:
@@ -726,9 +717,50 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
             print("Warning: solenoid flow is choked and results might be wrong")
         return dPsolution
         
+class CompressibleFlowCheckValve:
+    def __init__(self, Cv, gamma):             # https://www.swagelok.com/downloads/webcatalogs/en/MS-06-84.pdf
+        self.Cv     = Cv
+        self.gamma  = gamma 
+        
+    def getMdot(self, Pin, Pout, roo_std, roo_in, T_in):
+        N2      = 6950                  # gives volumetric flowrate in STD l/min
+        N3      = 0.001/60              # to convert from g/min to kg/s
+        roo_air = 1.23                  # density of air at STD conditions, kg/m3
+        Tstd    = 293                   # STD temp, K
+        Pstd    = 101325                # STD pressure, Pa
+        Gg      = roo_std/roo_air       # specific gravity of inlet gas, dimensionless
+        dP      = Pin-Pout
+        
+        if Pout/Pin <=  (2/(self.gamma+1))**(self.gamma/(self.gamma-1)):
+            print("Warning: check valve flow is choked")
+            return 0.471*N2*self.Cv*Pin/atm*sqrt(1/(Gg*T_in))*roo_in*(T_in/Tstd)*(Pstd/Pin)*N3 # mass flow rate [kg/s]
+        else:
+            Vdot    = N2*self.Cv*Pin/atm*(1-2*dP/(3*Pin))*sqrt(dP/(Pin*Gg*T_in))   # volumetric flow rate, STD l/min
+            mdot    = Vdot*roo_in*(T_in/Tstd)*(Pstd/Pin)*N3                 # mass flow rate in kg/s
+            return mdot
+
+    def getPressureDrop(self, mdot, Pin, roo_std, roo_in, T_in):
+        N2      = 6950                  # gives volumetric flowrate in STD l/min
+        N3      = 0.001/60              # to convert from g/min to kg/s
+        roo_air = 1.23                  # density of air at STD conditions, kg/m3
+        Tstd    = 293                   # STD temp, K
+        Pstd    = 101325                # STD pressure, Pa
+        Gg      = roo_std/roo_air       # specific gravity of inlet gas, dimensionless
+        n       = 2.73                  # experimental correction factor for SOLENOID valves, used for initial guessing
+        
+        errorFunc   = lambda dP: mdot - self.getMdot(Pin, Pin-dP, roo_std, roo_in, T_in)
+        init_guess  = 1000/roo_in*(mdot*3600/(self.Cv*n*1))**2
+        #print("init_guess is", init_guess/psi, "psi")
+        dPsolution  = opt.fsolve(errorFunc, init_guess)[0]
+        #print("dPsolution is", dPsolution/psi, "psi")
+        
+        if (Pin-dPsolution)/Pin <=  (2/(self.gamma+1))**(self.gamma/(self.gamma-1)):
+            print("Warning: check valve flow is choked and results might be wrong")
+        return dPsolution
+
 class IncompressibleFlowSolenoid:
     def __init__(self, Cv):           # ISA-75.01.01-2007 valve sizing handbook
-        self.Cv = Cv                  # defined by orifice diameter. For 0.25" C=1.4, for 0.157" C=0.67
+        self.Cv = Cv                  # defined by orifice diameter and valve type, given by manufacturer
         self.FL = 0.9                 # characteristic to this type of valve (plug control, flow up)
         
     def getMdot(self, Pin, Pout, rooL, P_critical, P_vapor):
@@ -966,6 +998,7 @@ class GOXFluid:
         self.T_crit = 154.58            # K
         self.roo_crit = 436.14          # kg/m3
         self.LJ      = 118.5            # Lennard-Jones parameter [K]
+        self.roo_std = atm/(Runiv/self.mbar*293) # density at STD conditions, kg/m3
  
     def getDensity(self, P, T):
         return P/(self.R*T)             # density, kg/m3
@@ -1008,6 +1041,7 @@ class NitrogenFluid:
         self.T_crit = 126.192           # K
         self.roo_crit = 313.30          # kg/m3
         self.LJ     = 98.94             # Lennard-Jones parameter [K]
+        self.roo_std = atm/(Runiv/self.mbar*293) # density at STD conditions, kg/m3
     
     def getDensity(self, P, T):
         return P/(self.R*T)             # density, kg/m3
