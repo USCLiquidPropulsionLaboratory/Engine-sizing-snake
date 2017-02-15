@@ -255,7 +255,7 @@ timestep_small      = 5e-6      # seconds, used during initial transient
 timestep_nom        = 0.0001    # seconds, used after 0.01 seconds of simulation time
 t_transient         = 0.01      # seconds, estimated time of initial transient
 
-t_simulation        = 3         # seconds
+t_simulation        = 0.02      # seconds
 
 if t_simulation <= t_transient:
     simsteps    = int(ceil(t_simulation/timestep_small))
