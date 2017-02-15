@@ -718,9 +718,11 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
         return dPsolution
         
 class CompressibleFlowCheckValve:
-    def __init__(self, Cv, gamma):             # https://www.swagelok.com/downloads/webcatalogs/en/MS-06-84.pdf
+    def __init__(self, Cv, Pcrack, gamma, open):             # https://www.swagelok.com/downloads/webcatalogs/en/MS-06-84.pdf
         self.Cv     = Cv
+        self.Pcrack = Pcrack
         self.gamma  = gamma 
+        self.open   = open
         
     def getMdot(self, Pin, Pout, roo_std, roo_in, T_in):
         N2      = 6950                  # gives volumetric flowrate in STD l/min
@@ -730,6 +732,9 @@ class CompressibleFlowCheckValve:
         Pstd    = 101325                # STD pressure, Pa
         Gg      = roo_std/roo_air       # specific gravity of inlet gas, dimensionless
         dP      = Pin-Pout
+        
+        #print("Pin cek is", Pin/psi, "psi")
+        #print("Pout chek is", Pout/psi, "psi")
         
         if Pout/Pin <=  (2/(self.gamma+1))**(self.gamma/(self.gamma-1)):
             print("Warning: check valve flow is choked")
@@ -757,6 +762,9 @@ class CompressibleFlowCheckValve:
         if (Pin-dPsolution)/Pin <=  (2/(self.gamma+1))**(self.gamma/(self.gamma-1)):
             print("Warning: check valve flow is choked and results might be wrong")
         return dPsolution
+        
+    def setOpen(self):
+        self.open = True
 
 class IncompressibleFlowSolenoid:
     def __init__(self, Cv):           # ISA-75.01.01-2007 valve sizing handbook
@@ -1107,14 +1115,14 @@ class IdealgasTank:
             
 class LiquidPropellantTank:
 
-    def __init__(self, pressurant, propellant, tankvolume, proptemp, Tpres, Ppres, FF, Preg):
+    def __init__(self, pressurant, propellant, tankvolume, proptemp, Tpres, Ppres, FF, Pfeed):
         self.pressurant = pressurant
         self.propellant = propellant
         self.Vtank      = tankvolume                            # total tank volume [m3]
         self.Tprop      = proptemp                              # propellant temperature [K]
         self.Tpres      = Tpres                                 # pressurant temperature [K]
         self.Ptank      = Ppres                                 # pressurant pressure [Pa]
-        self.Preg       = Preg                                  # regulated feed pressure [Pa]
+        self.Pfeed      = Pfeed                                 # pressurant feed pressure [Pa]
         
         self.FF         = FF                                    # fill fraction is defined as Vpropellant/Vtank
         self.Vprop      = tankvolume*FF                         # propellant volume [m3]
@@ -1163,8 +1171,9 @@ class LiquidPropellantTank:
         Ppres_new       = Tpres_new*mPres_new*Runiv/(Vpres_new*mbar)
         #print("Tpres_new is", Tpres_new, "K")
         #print("Ppres_new is", Ppres_new/psi, "psi")
-        if Ppres_new > self.Preg:
-            print("WARNING: tank pressure higher than regulator outlet. Try decreasig time step")
+        #print("Pfeed is", self.Pfeed/psi, "psi")
+        if Ppres_new > self.Pfeed:
+            print("WARNING: tank pressure higher than feed pressure. Try decreasing time step")
         
            
         #update parameters
