@@ -8,6 +8,8 @@ from scipy import interpolate
 import scipy.optimize as opt
 import numpy as np
 import Moody_diagram
+from scipy.integrate import odeint
+import CoolProp.CoolProp as CP
 
 
 class MagnumOxPintle:
@@ -217,7 +219,26 @@ class GasOrifice:
         gamma       = self.gamma
         Pin_chokelimit = Pexit*((gamma+1)/2)**(gamma/(gamma-1))
         return Pin >= Pin_chokelimit
+        
+    def getTexit(self, Pin, Pexit, Tin):
+        M       = self.getMexit(Pin, Pexit)
+        return Flows1D.isentropicT(Tin, self.gamma, M)
 
+    def getMexit(self, Pin, Pexit):
+        if self.isChoked(Pin, Pexit):
+            M       = 1     
+            print("injector flow is choked")
+        else:
+            M       = Flows1D.getIsentropicMFromP(Pin, Pexit, self.gamma)
+            #print("injector M is", M)        
+        return M
+    
+    def getUexit(self, Pin, Pexit, Tin):
+        Texit   = self.getTexit(Pin, Pexit, Tin)            # exit temp, K
+        a       = sqrt(self.gamma*self.Rgas*Texit)          # sonic velocity, m/s
+        M       = self.getMexit(Pin, Pexit)                 # Mach number
+        return M*a                                          # exit velocity, m/s
+    
 #does not allow flow from exit to inlet (ie check valve)
 class LiquidOrifice:
     #Cd appox 0.62 for square orifice, 0.9 to 0.95 for well-rounded orifice
@@ -684,12 +705,29 @@ class RoughStraightCylindricalTube:
         else:
             errorFunc = lambda mdot: (Pout-Pin) - self.getPressureDrop(mdot, fluidViscosity, fluidDensity)
             return -opt.fsolve(errorFunc, sqrt(2*fluidDensity*(Pout-Pin)))[0]
+    
+class PressureRegulator:
+    def __init__(self, Pout, fluid):
+        self.Pout   = Pout
+    
+    def getTempDrop(self, Pin, Pout, T_in):    #J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
+        
+        def dTdP( T, P): 
+            return self.fluid.getJT(T, P)           # derivative (dT/dP)|constant enthalpy
+
+        Ps          = np.linspace(Pin, Pout, 5)     # 5 intervals
+        T0          = T_in                          # initial conditions
+        Ts          = odeint(dTdP, T0, Ps)          # integration results
+        T_out       = Ts[-1]
+        
+        return T_in - T_out                         # Temp drop [K]
             
 class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handbook
-    def __init__(self, Cv, gamma):
+    def __init__(self, Cv, fluid):
         self.Cv     = Cv                # valve flow coefficient, defined by orifice diameter and valve type
-        self.Fgamma = gamma/1.4
+        self.Fgamma = fluid.gamma/1.4
         self.xT     = 0.7               # characteristic to this type of valve(solenoid = plug control, flow up)
+        self.fluid  = fluid
         
     def getMdot(self, Pin, Pout, roo_in):
         n           = 2.73                                  # dimensionless experimental/unit correction factor
@@ -717,12 +755,25 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
             print("Warning: solenoid flow is choked and results might be wrong")
         return dPsolution
         
+    def getTempDrop(self, Pin, Pout, T_in):    #J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
+        
+        def dTdP( T, P): 
+            return self.fluid.getJT(T, P)           # derivative (dT/dP)|constant enthalpy
+
+        Ps          = np.linspace(Pin, Pout, 5)     # 5 intervals
+        T0          = T_in                          # initial conditions
+        Ts          = odeint(dTdP, T0, Ps)          # integration results
+        T_out       = Ts[-1]
+        
+        return T_in - T_out                         # Temp drop [K]
+        
 class CompressibleFlowCheckValve:
-    def __init__(self, Cv, Pcrack, gamma, open):             # https://www.swagelok.com/downloads/webcatalogs/en/MS-06-84.pdf
+    def __init__(self, Cv, Pcrack, fluid):          # https://www.swagelok.com/downloads/webcatalogs/en/MS-06-84.pdf
         self.Cv     = Cv
         self.Pcrack = Pcrack
-        self.gamma  = gamma 
+        self.gamma  = fluid.gamma 
         self.open   = open
+        self.fluid  = fluid
         
     def getMdot(self, Pin, Pout, roo_std, roo_in, T_in):
         N2      = 6950                  # gives volumetric flowrate in STD l/min
@@ -741,6 +792,7 @@ class CompressibleFlowCheckValve:
             return 0.471*N2*self.Cv*Pin/atm*sqrt(1/(Gg*T_in))*roo_in*(T_in/Tstd)*(Pstd/Pin)*N3 # mass flow rate [kg/s]
         else:
             Vdot    = N2*self.Cv*Pin/atm*(1-2*dP/(3*Pin))*sqrt(dP/(Pin*Gg*T_in))   # volumetric flow rate, STD l/min
+            #print("volum flow rate is", Vdot, "stdL/min")
             mdot    = Vdot*roo_in*(T_in/Tstd)*(Pstd/Pin)*N3                 # mass flow rate in kg/s
             return mdot
 
@@ -763,8 +815,16 @@ class CompressibleFlowCheckValve:
             print("Warning: check valve flow is choked and results might be wrong")
         return dPsolution
         
-    def setOpen(self):
-        self.open = True
+    def getTempDrop(self, Pin, Pout, T_in):    #J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
+        
+        def dTdP( T, P): 
+            return self.fluid.getJT(T, P)           # derivative (dT/dP)|constant enthalpy
+
+        Ps          = np.linspace(Pin, Pout, 5)     # 5 intervals
+        T0          = T_in                          # initial conditions
+        Ts          = odeint(dTdP, T0, Ps)          # integration results
+        T_out       = Ts[-1]
+        return T_in - T_out                         # Temp drop [K]
 
 class IncompressibleFlowSolenoid:
     def __init__(self, Cv):           # ISA-75.01.01-2007 valve sizing handbook
@@ -859,15 +919,23 @@ class CoolingJacket:
 
 class N2OFluid:
     def __init__(self):
+        '''
+        # property equations from http://edge.rit.edu/content/P07106/public/Nox.pdf
         self.TCrit  = 309.57            # K 
         self.rooCrit = 452              # kg/m3
         self.pCrit  = 7251e3            # Pa
         self.gamma  = 1.27
         self.Mw     = 44.013            # kg/kmol
-    
-    # property equations from http://edge.rit.edu/content/P07106/public/Nox.pdf
+        '''
+        self.TCrit   = CP.PropsSI("Tcrit", "NitrousOxide")           # K
+        self.rooCrit = CP.PropsSI("rhocrit", "NitrousOxide")         # kg/m3
+        self.pCrit   = CP.PropsSI("pcrit", "NitrousOxide")           # Pa
+        self.gamma   = 1.27
+        self.Mw      = CP.PropsSI("molarmass", "NitrousOxide")*10**3 # kg/kmol
+        
     
     def getLiquidEnthalpy(self, fluidTemp):
+        '''
         bL = [-200, 116.043, -917.225, 794.779, -589.587]
         Tr = fluidTemp/self.TCrit
         
@@ -877,8 +945,12 @@ class N2OFluid:
              enthL += bL[i]*(1-Tr)**(i/3.)
              
         return enthL*1000. #J/kg
+        '''
+        enthL = CP.PropsSI("H", "T", fluidTemp, "Q", 0, "NitrousOxide")
+        return enthL
     
     def getVaporEnthalpy(self, fluidTemp):
+        '''
         bV = [-200, 440.055, -459.701, 434.081, -485.338] 
         Tr = fluidTemp/self.TCrit
     
@@ -888,8 +960,12 @@ class N2OFluid:
              enthV += bV[i]*(1-Tr)**(i/3.)
         
         return enthV*1000. #J/kg
+        '''
+        enthV = CP.PropsSI("H", "T", fluidTemp, "Q", 1, "NitrousOxide")
+        return enthV
     
     def getLatentHeat(self, fluidTemp):
+        '''
         bL = [-200, 116.043, -917.225, 794.779, -589.587]
         bV = [-200, 440.055, -459.701, 434.081, -485.338] 
         Tr = fluidTemp/self.TCrit
@@ -902,8 +978,13 @@ class N2OFluid:
              enthV += bV[i]*(1-Tr)**(i/3.)
         
         return (enthV-enthL)*1000. #J/kg
+        '''
+        enthL = CP.PropsSI("H", "T", fluidTemp, "Q", 0, "NitrousOxide")
+        enthV = CP.PropsSI("H", "T", fluidTemp, "Q", 1, "NitrousOxide")
+        return enthV-enthL
         
     def getLiquidDensity(self, fluidTemp):
+        '''
         bL = [1.72328, -0.8395, 0.5106, -0.10412]
         Tr = fluidTemp/self.TCrit
         exponent=0.
@@ -912,8 +993,12 @@ class N2OFluid:
             exponent += bL[j]*(1-Tr)**((j+1)/3.)
             
         return self.rooCrit*exp(exponent)
+        '''
+        denL = CP.PropsSI("D", "T", fluidTemp, "Q", 0, "NitrousOxide")
+        return denL
         
     def getVaporDensity(self, fluidTemp):
+        '''
         bV = [-1.009, -6.28792, 7.50332, -7.90463, 0.629427]
         Tr = fluidTemp/self.TCrit
         exponent=0.
@@ -922,8 +1007,12 @@ class N2OFluid:
             exponent += bV[i]*(1/Tr-1)**((i+1)/3.)
             
         return self.rooCrit*exp(exponent)
+        '''
+        denV = CP.PropsSI("D", "T", fluidTemp, "Q", 1, "NitrousOxide")
+        return denV
     
     def getVaporPressure(self, fluidTemp):
+        '''
         bV = [-6.71893, 1.35966, -1.3779, -4.051]
         pV = [1, 1.5, 2.5, 5]
         Tr = fluidTemp/self.TCrit
@@ -933,8 +1022,12 @@ class N2OFluid:
             exponent += bV[i]*(1-Tr)**(pV[i])
             
         return self.pCrit*exp(exponent/Tr)
+        '''
+        pV = CP.PropsSI("P", "T", fluidTemp, "Q", 1, "NitrousOxide")
+        return pV
     
     def getLiquidSpecificHeat(self, fluidTemp):   #isobaric specific heat c_p
+        '''
         bL = [2.49973, 0.023454, -3.80136, 13.0945, -14.518]
         pL = [-1, 1, 2, 3]
         Tr = fluidTemp/self.TCrit
@@ -944,10 +1037,17 @@ class N2OFluid:
             cp += bL[i]*(1-Tr)**(pL[i-1])
             
         return cp*bL[0]*1000. #J/kg
+        '''
+        cp = CP.PropsSI("Cpmass", "T", fluidTemp, "Q", 0, "NitrousOxide")
+        return cp
     
     def getLiquidViscosity(self, fluidTemp):   # dynamic viscosity mu
+        '''
         theta = (self.TCrit - 5.24)/(fluidTemp - 5.24)
         return 0.0293423/1000*exp( 1.6089*(theta-1)**(1/3) + 2.0439*(theta-1)**(4/3) ) #Ns/m^2
+        '''
+        mu = CP.PropsSI("viscosity", "T", fluidTemp, "Q", 0, "NitrousOxide")
+        return mu
 
 class Kerosene:
     
@@ -973,113 +1073,136 @@ class IPAFluid:
     def getDensity(self):
         return self.density         
         
+       
+       
+class HeFluid:
+    
+    def __init__(self):
+        self.P_crit     = CP.PropsSI("pcrit", "Helium")
+        self.T_crit     = CP.PropsSI("Tcrit", "Helium")
+        self.rho_crit   = CP.PropsSI("rhocrit", "Helium")
+    
+    def getDensity(self, pres, Temp):
+        density         = CP.PropsSI("D", "T", Temp, "P", pres, "Helium") # density, kg/m3
+        #self.checkPhase(pres, Temp)
+        return density 
+        
+    def getViscosity(self, pres, Temp):
+        viscosity       = CP.PropsSI("V", "T", Temp, "P", pres, "Helium") # Dynamic viscosity, Pa*s
+        #self.checkPhase(pres, Temp)
+        return viscosity
+        
+    def getJT(self, P, T): 
+        return CP.PropsSI('d(T)/d(P)|Hmass', 'P' ,P, 'T', T, 'Helium') # Joule-Thomson coeff in [K/Pa]
+        
+    def checkPhase(self, pres, Temp):
+        phase           = CP.PhaseSI("T", Temp, "P", pres, "Helium")
+        if phase != 'liquid' and phase != 'supercritical_liquid':
+            print("He is", phase, "at this point")
+           
         
 class LOXFluid:
     
     def __init__(self):
-        self.density = 1141             # kg/m3
-        self.P_crit  = 5e6              # Pa
-        self.P_vapor = 1e5              # Pa, at 90K
-        self.mu      = 2e-4             # Pas = Ns/m2, at 7 Mpa (1000psi) & 90 K 
-                                        # http://www.nist.gov/srd/upload/jpcrd395.pdf, page 1101
-    def getDensity(self):
-        return self.density 
-        
-class LOXFluid2:
+        self.P_crit     = CP.PropsSI("pcrit", "Oxygen")
+        self.T_crit     = CP.PropsSI("Tcrit", "Oxygen")
+        self.rho_crit   = CP.PropsSI("rhocrit", "Oxygen")
     
-    def __init__(self):
-        self.density = 1141             # kg/m3
-        self.P_crit  = 5e6              # Pa
-        self.P_vapor = 1e5              # Pa, at 90K
-        self.mu      = 2e-4             # Pas = Ns/m2, at 7 Mpa (1000psi) & 90 K 
-                                        # http://www.nist.gov/srd/upload/jpcrd395.pdf, page 1101
-    def getDensity(self):
-        return self.density 
- 
+    def getDensity(self, pres, Temp):
+        density         = CP.PropsSI("D", "T", Temp, "P", pres, "Oxygen") # density, kg/m3
+        self.checkPhase(pres, Temp)
+        return density 
+        
+    def getViscosity(self, pres, Temp):
+        viscosity       = CP.PropsSI("V", "T", Temp, "P", pres, "Oxygen") # Dynamic viscosity, Pa*s
+        self.checkPhase(pres, Temp)
+        return viscosity
+        
+    def checkPhase(self, pres, Temp):
+        phase           = CP.PhaseSI("T", Temp, "P", pres, "Oxygen")
+        #print("pres is", pres/psi, "psi")
+        #print("temp is", Temp, "K")
+        if phase != 'liquid' and phase != 'supercritical_liquid':
+            print("LOX is", phase, "at this point")
+        
+        
 class GOXFluid:
     
     def __init__(self):
-        self.gamma  = 1.4              
-        self.mbar   = 32                # kg/kmol
-        self.R      = Runiv/self.mbar   # J/kgK
-        self.P_crit = 5.043e6           # Pa
-        self.T_crit = 154.58            # K
-        self.roo_crit = 436.14          # kg/m3
-        self.LJ      = 118.5            # Lennard-Jones parameter [K]
-        self.roo_std = atm/(Runiv/self.mbar*293) # density at STD conditions, kg/m3
+        self.gamma      = 1.4
+        self.mbar       = CP.PropsSI("molarmass", "Oxygen")*10**3
+        self.R          = Runiv/self.mbar
+        self.P_crit     = CP.PropsSI("pcrit", "Oxygen")
+        self.T_crit     = CP.PropsSI("Tcrit", "Oxygen")
+        self.roo_crit   = CP.PropsSI("rhocrit", "Oxygen")
+        self.roo_std    = CP.PropsSI("D", "T", 293, "P", 101325, "Oxygen")
  
     def getDensity(self, P, T):
-        return P/(self.R*T)             # density, kg/m3
+        density = CP.PropsSI("D", "T", T, "P", P, "Oxygen") # density, kg/m3
+        self.checkPhase(T, P)
+        return density
         
-    def getViscosity(self, P, T):       # http://www.boulder.nist.gov/div838/theory/refprop/NAO.PDF
-        roo         = P/(self.R*T)      # density, kg/m3
-        #print("roo is", roo, "kg/m3")
-        delta       = roo/self.roo_crit
-        tau         = self.T_crit/T
-        Tstar       = T/self.LJ
-        sigma       = 0.3428            # some parameter
-        bs          = [0.431, -0.4623, 0.08406, 0.005341, -0.0031]
+    def getViscosity(self, P, T):     
+        viscosity = CP.PropsSI("viscosity", "T", T, "P", P, "Oxygen") # Dynamic viscosity, Pa*s
+        self.checkPhase(P, T)
+        return viscosity
         
-        argu        = 0.
-        for j in range(0,5):
-            argu   += bs[j]*(log(Tstar))**j
-        SigT        = exp(argu)
-        nyy_0       = 0.0266958*sqrt(self.mbar*T)/(sigma**2*SigT)
-        
-        Ns          = [17.67, 0.4042, 0.0001077, 0.3510, -13.67]
-        ts          = [0.05, 0, 2.1, 0, 0.5]
-        ds          = [1, 5, 12, 8, 1]
-        ls          = [0, 0, 0, 1, 2]
-        gs          = [0, 0, 0, 1, 1]
-        
-        nyy_r       = 0.
-        for j in range(0,5):
-            nyy_r  += Ns[j]*tau**ts[j]*delta**ds[j]*exp( -gs[j]*delta**ls[j] )
-            
-        return (nyy_0 + nyy_r)*1e-6 
+    def getJT(self, P, T): 
+        return CP.PropsSI('d(T)/d(P)|Hmass', 'P', P, 'T', T, 'Oxygen') # Joule-Thomson coeff in [K/Pa]
 
+    def checkPhase(self, pres, Temp):
+        phase           = CP.PhaseSI("T", Temp, "P", pres, "Oxygen")
+        if phase == 'liquid' or phase == 'supercritical_liquid':
+            print("GOX is", phase, "at this point")
 
 class NitrogenFluid:
 
     def __init__(self):
-        self.gamma  = 1.403
-        self.mbar   = 28.01348          # kg/kmol
-        self.R      = Runiv/self.mbar   # J/kgK
-        self.P_crit = 3.3958e6          # Pa
-        self.T_crit = 126.192           # K
-        self.roo_crit = 313.30          # kg/m3
-        self.LJ     = 98.94             # Lennard-Jones parameter [K]
-        self.roo_std = atm/(Runiv/self.mbar*293) # density at STD conditions, kg/m3
-    
+        self.gamma      = 1.403
+        self.mbar       = CP.PropsSI("molarmass", "Nitrogen")*10**3
+        self.R          = Runiv/self.mbar
+        self.P_crit     = CP.PropsSI("pcrit", "Nitrogen")
+        self.T_crit     = CP.PropsSI("Tcrit", "Nitrogen")
+        self.roo_crit   = CP.PropsSI("rhocrit", "Nitrogen")
+        self.roo_std    = CP.PropsSI("D", "T", 293, "P", 101325, "Nitrogen")
+        
+        '''
+        # Interpolation of Joule-Thomson coefficients
+        
+        Pvector   = np.array([101.325, 2026.5, 3394.39, 6079.5, 10132.5, 14185.5, 18238.5, 20265])*1000
+        Tvector   = np.array([148.15, 160.65, 173.15, 185.65, 198.15, 223.15, 248.15, 273.15, 298.15, 323.15, 348.15, 373.15])
+        
+        #Joule-Thomson coeffs from http://www.ddbst.com/en/EED/PCP/JTC_C1056.php
+        
+        JT_grid     = np.array([[ 8.17, 7.62, 6.78, 4.88, 1.46, 0.52, 0.19, 0.07],
+       [ 7.10, 6.56, 5.97, 4.82, 2.34, 0.97, 0.51, 0.37],
+       [ 6.20, 5.71, 5.28, 4.37, 2.77, 1.41, 0.79, 0.61],
+       [ 5.45, 5.03, 4.67, 3.97, 2.79, 1.65, 0.97, 0.75],
+       [ 4.81, 4.48, 4.15, 3.59, 2.64, 1.75, 1.08, 0.83],
+       [ 3.79, 3.58, 3.33, 2.96, 2.28, 1.67, 1.14, 0.93],
+       [ 3.07, 2.89, 2.74, 2.44, 1.95, 1.49, 1.11, 0.94],
+       [ 2.54, 2.39, 2.28, 2.01, 1.64, 1.30, 1.01, 0.88],
+       [ 2.12, 1.97, 1.88, 1.67, 1.36, 1.09, 0.86, 0.77],
+       [ 1.77, 1.63, 1.55, 1.40, 1.13, 0.90, 0.72, 0.65],
+       [ 1.49, 1.36, 1.28, 1.15, 0.92, 0.73, 0.57, 0.53],
+       [ 1.24, 1.13, 1.06, 0.94, 0.75, 0.57, 0.45, 0.41]])
+       
+        self.JT_int  = interpolate.RectBivariateSpline(Tvector, Pvector, JT_grid)    # Note the order of Y and X!!
+        # Units are [K/MPa]
+        '''
+        
     def getDensity(self, P, T):
-        return P/(self.R*T)             # density, kg/m3
+        density     = CP.PropsSI("D", "T", T, "P", P, "Nitrogen")  # density, kg/m3
+        return density
     
-    def getViscosity(self, P, T):       # http://www.boulder.nist.gov/div838/theory/refprop/NAO.PDF
-        roo         = P/(self.R*T)      # density, kg/m3
-        #print("roo is", roo, "kg/m3")
-        delta       = roo/self.roo_crit
-        tau         = self.T_crit/T
-        Tstar       = T/self.LJ
-        sigma       = 0.3656            # some parameter
-        bs          = [0.431, -0.4623, 0.08406, 0.005341, -0.0031]
+    def getViscosity(self, P, T):      
+        viscosity   = CP.PropsSI("viscosity", "T", T, "P", P, "Nitrogen") # Dynamic viscosity, Pa*s
+        return viscosity
         
-        argu        = 0.
-        for j in range(0,5):
-            argu   += bs[j]*(log(Tstar))**j
-        SigT        = exp(argu)
-        nyy_0       = 0.0266958*sqrt(self.mbar*T)/(sigma**2*SigT)
+    def getJT(self, P, T): 
+        #return self.JT_int.ev(Temp, Pressure)/1e6   
+        return CP.PropsSI('d(T)/d(P)|Hmass','P',P,'T',T,'Nitrogen') # Joule-Thomson coeff in [K/Pa]
         
-        Ns          = [10.72, 0.03989, 0.001208, -7.402, 4.620]
-        ts          = [0.1, 0.25, 3.2, 0.9, 0.3]
-        ds          = [2, 10, 12, 2, 1]
-        ls          = [0, 1, 1, 2, 3]
-        gs          = [0, 1, 1, 1, 1]
-        
-        nyy_r       = 0.
-        for j in range(0,5):
-            nyy_r  += Ns[j]*tau**ts[j]*delta**ds[j]*exp( -gs[j]*delta**ls[j] )
-            
-        return (nyy_0 + nyy_r)*1e-6
         
     
 class IdealgasTank:
