@@ -132,14 +132,18 @@ oxtank          = rc.IdealgasTank(GOX, Voxtank, ToxStart, PoxtankStart)
 fueltank        = rc.LiquidPropellantTank(nitrogen, kerosene, Vfueltank, TfuelStart, TfuelPresStart,\
                     PfueltankStart, FFfueltankStart, Preg_N2)
 
+#initialize pressure regulators
+N2_regu         = rc.PressureRegulator(Preg_N2, nitrogen)
+ox_regu         = rc.PressureRegulator(Preg_ox, GOX)
+
 #initialize solenoids
 fuelSole        = rc.IncompressibleFlowSolenoid( Cv_fuel_valve)
-oxSole          = rc.CompressibleFlowSolenoid( Cv_ox_valve, GOX.gamma)
-presSole        = rc.CompressibleFlowSolenoid( Cv_pres_valve, nitrogen.gamma)
+oxSole          = rc.CompressibleFlowSolenoid( Cv_ox_valve, GOX)
+presSole        = rc.CompressibleFlowSolenoid( Cv_pres_valve, nitrogen)
 
 #initialize check valves
-ox_check        = rc.CompressibleFlowCheckValve( Cv_ox_check, Pcrack_ox_check, GOX.gamma, False)
-pres_check      = rc.CompressibleFlowCheckValve( Cv_pres_check, Pcrack_pres_check, nitrogen.gamma, False)
+ox_check        = rc.CompressibleFlowCheckValve( Cv_ox_check, Pcrack_ox_check, GOX)
+pres_check      = rc.CompressibleFlowCheckValve( Cv_pres_check, Pcrack_pres_check, nitrogen)
 
 #initialize tubing
 ox_tube         = rc.RoughStraightCylindricalTube(d_oxtube, L_oxtube, roughness, True)
@@ -173,19 +177,24 @@ mfuelPres       = [fuelprestank.getM()]             # pressurant mass in fuel pr
 time            = [0]                               # time array [s]
 
 mdot_ox         = [0]                               # ox mass flow out of the tank [kg/s]
-roo_oxtank      = oxtank.density                    # density in oxtank [kg/m^3]
 P1ox            = [0]                               # ox tank presssure [Pa]
 P2ox            = [0]                               # ox regulator outlet pressure [Pa]
 P3ox            = [0]                               # ox check valve outlet pressure [Pa]      
 P4ox            = [0]                               # ox flow solenoid outlet pressure [Pa]
 P5ox            = [0]                               # ox injector inlet pressure [Pa]
 
+T1ox            = [0]                               # ox tank temp [K]
+T2ox            = [0]                               # ox regulator output temp [K]
+T3ox            = [0]                               # ox check valve outlet temp [K]
+T4ox            = [0]                               # ox flow solenoid outlet temp [K]
+T5ox            = [0]                               # ox injector inlet temp [K]
+
 mdot_fuel       = [0]                               # fuel mass flow out of the tank [kg/s]
 rooFuel         = fueltank.propellant.density       # fuel density, assumed constant [kg/m3]
-P2fuel          = [0]                               # fuel tank presssure [Pa]
-P3fuel          = [0]                               # fuel solenoid outlet pressure [Pa]      
-P4fuel          = [0]                               # fuel cooling jacket inlet pressure [Pa]
-P5fuel          = [0]                               # fuel injector inlet pressure [Pa]
+P1fuel          = [0]                               # fuel tank presssure [Pa]
+P2fuel          = [0]                               # fuel solenoid outlet pressure [Pa]      
+P3fuel          = [0]                               # fuel cooling jacket inlet pressure [Pa]
+P4fuel          = [0]                               # fuel injector inlet pressure [Pa]
 
 mdot_fuel_pres  = [0]                               # fuel pressurant mass flow rate [kg/s]
 P3pres          = [0]                               # pressurant pressure at check valve outlet [kg/s]
@@ -232,21 +241,20 @@ print("mN2start in fuel tank is", '%.2f'%(fueltank.getMpres()), "kg")
 # (P3pres-P4pres)   = Nitrogen solenoid valve pressure drop
 # (P4pres-P5pres)   = Nitrogen tubing pressure drop
 
-# P2fuel            = fuel tank pressure
-# P3fuel            = fuel valve outlet pressure
-# P4fuel            = cooling jacket inlet pressure
-# P5fuel            = injector inlet pressure
-# (P1fuel-P2fuel)   = regulator+tubing pressure drop,           nitrogen flow, is solved separately from fuel flow 
-# (P2fuel-P3fuel)   = fuel valve pressure drop,                 eq1
-# (P3fuel-P4fuel)   = fuel tubing pressure drop,                eq2
-# (P4fuel-P5fuel)   = cooling jacket pressure drop,             eq3
-# (P5fuel-Pchamber) = injector pressure drop,                   eq4
+# P1fuel            = fuel tank pressure
+# P2fuel            = fuel valve outlet pressure
+# P3fuel            = cooling jacket inlet pressure
+# P4fuel            = injector inlet pressure
+# (P1fuel-P2fuel)   = fuel valve pressure drop,                 eq1
+# (P2fuel-P3fuel)   = fuel tubing pressure drop,                eq2
+# (P3fuel-P4fuel)   = cooling jacket pressure drop,             eq3
+# (P4fuel-Pchamber) = injector pressure drop,                   eq4
 
 # In the case of oxidizer, P2 and Pchamber are known, so one must solve for P3, P4, and P5. Fourth unknown is the mass flow rate. The four equations are check valve/solenoid/tubing/injector pressure drops. These equations are defined in oxfunks method below, and underlying physics are in RocketComponents.py under their respective classes.
 
 # With pressurant, P2 (regulation pressure) and P5 (fuel tank pressure) are known, so one must solve for P3 and P4. The third unknown is pressurant mass flow rate. Equations to be solved are pressure drops over the check valve, solenoid valve, and the tubing.
 
-# With fuel P2 and Pchamber are known, so one must solve for P3, P4, and P5. Fourth unknown is mass flow rate.
+# With fuel P1 and Pchamber are known, so one must solve for P2, P3, and P4. Fourth unknown is mass flow rate.
 
 # fsolve requires sensible initial guesses for all unknowns. They are established by guessing the mass flow rate, because all other pressures trickle down from that.
 
@@ -255,7 +263,7 @@ timestep_small      = 5e-6      # seconds, used during initial transient
 timestep_nom        = 0.0001    # seconds, used after 0.01 seconds of simulation time
 t_transient         = 0.01      # seconds, estimated time of initial transient
 
-t_simulation        = 0.02      # seconds
+t_simulation        = 3         # seconds
 
 if t_simulation <= t_transient:
     simsteps    = int(ceil(t_simulation/timestep_small))
@@ -265,7 +273,7 @@ else:
 print("Sim time is", t_simulation, "s, number of simsteps is", simsteps)
 
 i=0
-for i in range(0,simsteps):
+for i in range(0, simsteps):
     if time[i] < 0.01:
         timestep    = 1e-5                             # use shorter timestep during initial transient
     else: timestep    = timestep_nom                   # proceed with nominal timestep
@@ -273,7 +281,7 @@ for i in range(0,simsteps):
     #print("i=", i) 
     P1ox            = Poxtank[i]
     P2ox            = Preg_ox    
-    P2fuel          = Pfueltank[i]
+    P1fuel          = Pfueltank[i]
     Pchamb          = Pchamber[i]
     mu_ox           = GOX.getViscosity(Preg_ox, Toxtank[i])
     roo_ox          = GOX.getDensity(Preg_ox, Toxtank[i])
@@ -298,9 +306,9 @@ for i in range(0,simsteps):
         #print("P_chamber is", Pchamber[i]/psi, "psi")
         
         mdot_fuel_guess = mdot_ox_guess/OF_nom
-        P3fuel_guess    = P2fuel - fuelSole.getPressureDrop(mdot_fuel_guess, rooFuel)
-        P4fuel_guess    = P3fuel_guess - fuel_tube.getPressureDrop(mdot_fuel_guess, mu_fuel, rooFuel)
-        P5fuel_guess    = P4fuel_guess - jacket.getPressureDrop(mdot_fuel_guess)
+        P2fuel_guess    = P1fuel - fuelSole.getPressureDrop(mdot_fuel_guess, rooFuel)
+        P3fuel_guess    = P2fuel_guess - fuel_tube.getPressureDrop(mdot_fuel_guess, mu_fuel, rooFuel)
+        P4fuel_guess    = P3fuel_guess - jacket.getPressureDrop(mdot_fuel_guess)
         
         mdot_pres_guess = mdot_fuel_guess*roo_N2_fuel/rooFuel #volumetric flowrates of fuel and pressurant are the same
         P3pres_guess    = Preg_N2 - pres_check.getPressureDrop(mdot_pres_guess, Preg_N2, nitrogen.roo_std, roo_N2_fuel, Tpres)
@@ -334,13 +342,12 @@ for i in range(0,simsteps):
         #print("P_chamber is", Pchamber[i]/psi, "psi")
         
         mdot_fuel_guess  = mdot_fuel[i-1] #mdot_ox_guess/OF_nom*1
+        P2fuel_guess    = P2fuel[i-1]
         P3fuel_guess    = P3fuel[i-1]
         P4fuel_guess    = P4fuel[i-1]
-        P5fuel_guess    = P5fuel[i-1]
         #print("P2fuel is", P2fuel/psi, "psi")
         #print("P3fuel_guess is is", P3fuel_guess/psi, "psi")
         #print("P4fuel_guess is is", P4fuel_guess/psi, "psi")
-        #print("P5fuel_guess is is", P5fuel_guess/psi, "psi")
         #print("P_chamber is", Pchamber[i]/psi, "psi")
         
         mdot_pres_guess = mdot_fuel_pres[i-1]
@@ -349,7 +356,7 @@ for i in range(0,simsteps):
         
        
     initial_ox_guesses  = [P3ox_guess, P4ox_guess, P5ox_guess, mdot_ox_guess]
-    initial_fuel_guesses= [P3fuel_guess, P4fuel_guess, P5fuel_guess, mdot_fuel_guess]
+    initial_fuel_guesses= [P2fuel_guess, P3fuel_guess, P4fuel_guess, mdot_fuel_guess]
     initial_pres_guesses= [P3pres_guess, P4pres_guess, mdot_pres_guess]
     
     def oxfunks(U):       # defines the system of equations and unknowns U to be solved
@@ -385,16 +392,16 @@ for i in range(0,simsteps):
 
     
     def fuelfunks(U):       # defines the system of equations and unknowns U to be solved
-        P3              = U[0]
-        P4              = U[1]
-        P5              = U[2]
+        P2              = U[0]
+        P3              = U[1]
+        P4              = U[2]
         mdot            = U[3]
         #print("U is", U)
         #print("fuelmdot is", mdot)
-        out             = [ mdot - fuelSole.getMdot(P2fuel, P3, rooFuel, kerosene.P_crit, kerosene.P_vapor)  ]
-        out.append( P3 - P4 - fuel_tube.getPressureDrop(mdot, mu_fuel, rooFuel) )
-        out.append( P4 - P5 - jacket.getPressureDrop(mdot) ) 
-        out.append( P5 - Pchamb - fuel_orifice.getPressureDrop(mdot, rooFuel) )
+        out             = [ mdot - fuelSole.getMdot(P1fuel, P2, rooFuel, kerosene.P_crit, kerosene.P_vapor)  ]
+        out.append( P2 - P3 - fuel_tube.getPressureDrop(mdot, mu_fuel, rooFuel) )
+        out.append( P3 - P4 - jacket.getPressureDrop(mdot) ) 
+        out.append( P4 - Pchamb - fuel_orifice.getPressureDrop(mdot, rooFuel) )
         
         #print("fueloutti", out)
         return out
@@ -407,7 +414,7 @@ for i in range(0,simsteps):
     # Now that fuel mass flow rate out has been solved, intermediate state (=no N2 inflow yet) of the fuel tank can be established:
     fueltank.update(TfuelPres[i], 0, mdot_fuel_new, timestep) 
     Pfuel_intermediate  = fueltank.getPtank()
-    Pfuel_eff           = (Pfuel_intermediate + P2fuel)/2 # average of pressures before and after ejection of fuel from tank; incoming nitrogen will see this 'effective' pressure in the tank
+    Pfuel_eff           = (Pfuel_intermediate + P1fuel)/2 # average of pressures before and after ejection of fuel from tank; incoming nitrogen will see this 'effective' pressure in the tank
     
     # Next, nitrogen flow into the void created by ejected fuel is calculated
     
@@ -474,9 +481,9 @@ for i in range(0,simsteps):
         P4ox            = [ox_solution[1]]
         P5ox            = [ox_solution[2]]
         mdot_ox         = [ox_solution[3]]
-        P3fuel          = [fuel_solution[0]]
-        P4fuel          = [fuel_solution[1]]
-        P5fuel          = [fuel_solution[2]]
+        P2fuel          = [fuel_solution[0]]
+        P3fuel          = [fuel_solution[1]]
+        P4fuel          = [fuel_solution[2]]
         mdot_fuel       = [fuel_solution[3]]
         P3pres          = [pres_solution[0]]
         P4pres          = [pres_solution[1]]
@@ -488,9 +495,9 @@ for i in range(0,simsteps):
         P4ox.append( ox_solution[1])
         P5ox.append( ox_solution[2])
         mdot_ox.append( ox_solution[3])
-        P3fuel.append( fuel_solution[0])
-        P4fuel.append( fuel_solution[1])
-        P5fuel.append( fuel_solution[2])
+        P2fuel.append( fuel_solution[0])
+        P3fuel.append( fuel_solution[1])
+        P4fuel.append( fuel_solution[2])
         mdot_fuel.append( fuel_solution[3])
         P3pres.append( pres_solution[0])
         P4pres.append( pres_solution[1])
@@ -550,7 +557,7 @@ print("SS fuel tube velocity is", '%.1f'%(mdot_fuel[-1]/(rooFuel*pi*d_fueltube**
 print("SS ox injection velocity is", '%.1f'%(mdot_ox[-1]/(roo_ox*pi*diameter_oxInjectorHoles**2/4*numOxInjectorHoles)), "m/s")
 print("SS fuel injection velocity is", '%.1f'%(mdot_fuel[-1]/(rooFuel*pi*diameter_fuelInjectorHoles**2/4*numFuelHoles)), "m/s")
 print("SS ox injector P_drop", '%.1f'%((P4ox[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
-print("SS fuel injector P_drop", '%.1f'%((P5fuel[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
+print("SS fuel injector P_drop", '%.1f'%((P4fuel[-1]-Pchamber[-1])/Pchamber[-1]*100), "% of Pchamber")
 print("")
 
 # See what check valves are doing
@@ -574,9 +581,9 @@ P3ox.append( ox_solution[0])
 P4ox.append( ox_solution[1])
 P5ox.append(  ox_solution[2])
 mdot_ox.append( ox_solution[3])
-P3fuel.append( fuel_solution[0])
-P4fuel.append( fuel_solution[1])
-P5fuel.append( fuel_solution[2])
+P2fuel.append( fuel_solution[0])
+P3fuel.append( fuel_solution[1])
+P4fuel.append( fuel_solution[2])
 mdot_fuel.append( fuel_solution[3])
 P3pres.append( pres_solution[0])
 P4pres.append( pres_solution[1])
@@ -585,6 +592,7 @@ mdot_fuel_pres.append( pres_solution[2])
 OFratio.append( mdot_ox[i]/mdot_fuel[i])
 
 # plot time histories
+plt.ion()
 
 Preg_ox_array = full((1, len(time)), Preg_ox/psi)
 plt.figure(1)
@@ -619,11 +627,11 @@ plt.plot(time,array(P4pres)/psi, label='N2 solenoid valve out')
 plt.figure(2)
 plt.plot(time,array(Pfueltank)/psi, label='fuel tank')
 plt.figure(2)
-plt.plot(time,array(P3fuel)/psi, label='Pvalve_out')
+plt.plot(time,array(P2fuel)/psi, label='Pvalve_out')
 plt.figure(2)
-plt.plot(time,array(P4fuel)/psi, label='Pjacket_in')
+plt.plot(time,array(P3fuel)/psi, label='Pjacket_in')
 plt.figure(2)
-plt.plot(time,array(P5fuel)/psi, label='Pinj_in')
+plt.plot(time,array(P4fuel)/psi, label='Pinj_in')
 plt.figure(2)
 plt.plot(time,array(Pchamber)/psi, label='Pchamber')
 plt.figure(2)
@@ -732,9 +740,9 @@ y2  = Preg_N2/psi
 y3  = P3pres[-1]/psi
 y4  = P4pres[-1]/psi
 y5  = Pfueltank[-1]/psi
-y6  = P3fuel[-1]/psi
-y7  = P4fuel[-1]/psi
-y8  = P5fuel[-1]/psi
+y6  = P2fuel[-1]/psi
+y7  = P3fuel[-1]/psi
+y8  = P4fuel[-1]/psi
 y9  = Pchamber[-1]/psi
 plt.plot( [0, 1], [y1, y1], linewidth=2, label="Pressurant tank")
 plt.plot( [1, 2], [y1, y2], linewidth=2, label="Regulator")
