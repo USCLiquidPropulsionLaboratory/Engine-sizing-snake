@@ -17,8 +17,8 @@ import Flows1D as flows
 
 
 # nominal parameters
-Preg_ox          = 425*psi         # regulated pressurant outlet pressure [Pa]
-Preg_fu          = 450*psi         # regulated pressurant outlet pressure [Pa]
+Preg_ox         = 425*psi         # regulated pressurant outlet pressure [Pa]
+Preg_fu         = 450*psi         # regulated pressurant outlet pressure [Pa]
 
 mdot_fuel_nom   = 0.2               # This is only for cooling jacket pressure drop purposes [kg/s]
 Pdrop_jacket_nom= 1*psi             # Cooling jacket pressure drop at mdot_nominal [Pa]
@@ -43,7 +43,7 @@ L_presox_tube   = 0.6               # pressurant tank -> ox tank tube length [m]
 d_presfuel_tube = 1.0*inches        # pressurant tank -> fuel tank tube diameter [m]
 L_presfuel_tube = 0.6               # pressurant tank -> fuel tank tube length [m]
 
-d_oxtube        = 1.0*inches        # ox tank -> manifold tube diameter [m]
+d_oxtube        = 0.5*inches        # ox tank -> manifold tube diameter [m]
 L_oxtube        = 2.4               # ox tank -> manifold tube length [m]
 d_fueltube      = 1.0*inches        # fuel tank -> manifold tube diameter [m]
 L_fueltube      = 2.4               # fuel tank -> manifold tube length [m]
@@ -57,7 +57,7 @@ Cv_fuel_valve   = 17                # fuel valve characteristic parameter, dimen
 # Pintle injector (Note that there is only CFD data for OD_shaft = [14mm,16mm] )
 
 # Fuel side
-d_in_fu         = 0.5*inches                                # injector inlet diameter, m
+d_in_fu         = 0.5*inches                                # injector inlet diameter (two inlets!), m
 d_mani_fu       = 0.03                                      # manifold/converging section inlet diameter, m
 ID_shaft        = 0.01                                      # fuel annulus ID, m
 OD_shaft        = 0.015   #see note above                   # fuel annulus OD, m
@@ -68,7 +68,7 @@ h_exit          = A_fu_annulus/(2*pi*r_tip)                 # pintle exit slot h
 Dh_fu           = OD_shaft - ID_shaft                       # annulus hydraulic diameter, m
 rou_fu          = 2e-6/Dh_fu                                # annulus _DIMENSIONLESS_ roughness]
 # Ox side
-d_in_ox         = 0.5*inches                                # injector inlet diameter (two inlets!)
+d_in_ox         = 0.5*inches                                # injector inlet diameter,m
 d_mani_ox       = 0.08                                      # ox manifold diameter upstream from orifice plate, m
 Nori            = 8                                         # number of orifices in orifice plate
 d_ori           = 3.5e-3                                    # single orifice diameter, m
@@ -132,6 +132,7 @@ FFfueltankStart = 0.5                   # fuel tank fill fraction (Vfuel/Vtank)
 IPA             = rc.IPAFluid()
 nitrogen        = rc.NitrogenFluid()
 LOX             = rc.LOXFluid()
+helium          = rc.HeFluid()
 
 #initialize nozzle and chamber
 nozzle          = rc.ConvergingDivergingNozzle(A_nozzleExit, A_nozzleThroat)
@@ -177,6 +178,7 @@ cmass           = [chamber.m]                       # resident propellant mass i
 mdot_nozzle     = [nozzle.getmdot(gammaFireInit, RfireInit, chamber.get_P_inlet(), chamber.T, chamber.Pa)] # mass flow out of the nozzle [kg/s]
 Poxtank         = [oxtank.getPtank()]               # ox tank pressure [Pa]
 Toxtank         = [oxtank.getTpres()]               # pressurant temperature in ox tank [K]
+Tox             = [ToxStart]                        # oxidizer temperature [K]
 mPresOxtank     = [oxtank.getMpres()]               # pressurant mass in ox tank [kg]
 mox             = [oxtank.getMprop()]               # oxidizer mass in tank [kg]
 FFoxtank        = [oxtank.getFF()]                  # ox tank fill fraction defined as Vox/(Voxtank)
@@ -198,7 +200,7 @@ mfuelPres       = [fuelprestank.getM()]             # pressurant mass in fuel pr
 mdot_fuel_pres  = [0]                               # fuel pressurant mass flow rate [kg/s]
 
 mdot_ox         = [0]                               # liq ox mass flow out of the tank [kg/s]
-rooOx           = oxtank.propellant.density         # liq ox density, assumed constant [kg/m^3]
+rooOx           = oxtank.propellant.getDensity(PoxtankStart, ToxStart)      # liq ox density, [kg/m^3]
 P2ox            = [0]                               # ox tank presssure [Pa]
 P3ox            = [0]                               # ox solenoid outlet pressure [Pa]      
 P4ox            = [0]                               # ox cooling jacket inlet pressure [Pa]
@@ -273,7 +275,7 @@ for i in range(0,2000):
     P1fuel          = PfuelPres[i]
     P2fuel          = Pfueltank[i]
     Pchamb          = Pchamber[i]
-    mu_ox           = LOX.mu
+    mu_ox           = LOX.getViscosity(Poxtank[i], Tox[i])
     mu_fuel         = IPA.mu 
     mu_N2_ox        = nitrogen.getViscosity(Preg_ox, Toxtank[i])
     roo_N2_ox       = nitrogen.getDensity(Preg_ox, Toxtank[i])
@@ -281,7 +283,7 @@ for i in range(0,2000):
     roo_N2_fuel     = nitrogen.getDensity(Preg_fu, Tfueltank[i])
     
     Pcrit_ox        = LOX.P_crit
-    Pvapor_ox       = LOX.P_vapor
+    Pvapor_ox       = LOX.getVaporPressure(Tox[i])
     
     if i==0:    # First guesses. Based on choked flow at ox injector
         
@@ -414,21 +416,21 @@ for i in range(0,2000):
         print("Ox tank empty after", i, " iterations, ie", i*timestep, "seconds")
         print("remaining fuel", mfuel[i], "kg")
         print("remaining ox prs", moxPres[i], "kg,", "i.e.", moxPres[i]/moxPres[0]*100, " % of initial amount")
-        print("remaining fuel prs", fuelPres[i], "kg,", "i.e.", mfuelPres[i]/mfuelPres[0]*100, " % of initial amount")
+        print("remaining fuel prs", mfuelPres[i], "kg,", "i.e.", mfuelPres[i]/mfuelPres[0]*100, " % of initial amount")
         break
         
     if oxprestank.getPtank() < 1000*psi:
         print("Out of ox pressurant after", i, " iterations, ie", i*timestep, "seconds")
         print("remaining fuel", mfuel[i], "kg")
         print("remaining LOX", moxl[i], "kg")
-        print("remaining fuel prs", fuelPres[i], "kg,", "i.e.", mfuelPres[i]/mfuelPres[0]*100, " % of initial amount")
+        print("remaining fuel prs", mfuelPres[i], "kg,", "i.e.", mfuelPres[i]/mfuelPres[0]*100, " % of initial amount")
         break 
             
     if fueltank.getMprop() < 0:
         print("Fuel tank empty after", i, " iterations, ie", i*timestep, "seconds")
         print("remaining LOX", mox[i], "kg")
         print("remaining ox prs", moxPres[i], "kg,", "i.e.", moxPres[i]/moxPres[0]*100, " % of initial amount")
-        print("remaining fuel prs", fuelPres[i], "kg,", "i.e.", mfuelPres[i]/mfuelPres[0]*100, " % of initial amount")
+        print("remaining fuel prs", mfuelPres[i], "kg,", "i.e.", mfuelPres[i]/mfuelPres[0]*100, " % of initial amount")
         break
         
     if fuelprestank.getPtank() < 1000*psi:
@@ -464,6 +466,7 @@ for i in range(0,2000):
       
     Poxtank.append( oxtank.getPtank())
     Toxtank.append( oxtank.getTpres())
+    Tox.append( ToxStart)
     mPresOxtank.append( oxtank.getMpres())
     mox.append( oxtank.getMprop())
     FFoxtank.append( oxtank.getFF())
@@ -566,6 +569,7 @@ mdot_fuel.append( fuel_solution[3])
 OFratio.append( mdot_ox[i]/mdot_fuel[i])
 
 # plot time histories
+plt.ion()
 
 plt.figure(1)
 plt.plot(time,array(PoxPres)/psi, label='oxpres tank')

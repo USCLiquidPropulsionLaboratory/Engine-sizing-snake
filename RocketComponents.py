@@ -1052,13 +1052,13 @@ class N2OFluid:
 class Kerosene:
     
     def __init__(self):
-        self.density = 800              # kg/m3
-        self.P_crit = 1.8e6             # Pa
+        self.density    = 800              # kg/m3
+        self.P_crit     = 1.8e6            # Pa
         #http://thehuwaldtfamily.org/jtrl/research/Propulsion/Rocket%20Propulsion/Propellants/DLR,%20Comparative%20Study%20of%20Kerosene%20and%20Methane%20Engines.pdf
-        self.P_vapor = 2000             # Pa
-        self.mu     = 0.002             # dynamic viscosity, Ns/m2, average at 25C from different sources
+        self.P_vapor    = 2000             # Pa
+        self.mu         = 0.002            # dynamic viscosity, Ns/m2, average at 25C from different sources
         
-    def getDensity(self):
+    def getDensity(self, P, T):
         return self.density
         
         
@@ -1070,14 +1070,14 @@ class IPAFluid:
         self.P_vapor = 7000             # Pa, at 300K
         self.mu      = 2.5e-3             # Pas = Ns/m2, at 440psi & ?? K 
                                         # http://www.nist.gov/srd/upload/jpcrd395.pdf, page 1101
-    def getDensity(self):
+    def getDensity(self, P, T):
         return self.density         
         
-       
        
 class HeFluid:
     
     def __init__(self):
+        self.gamma      = 1.4
         self.P_crit     = CP.PropsSI("pcrit", "Helium")
         self.T_crit     = CP.PropsSI("Tcrit", "Helium")
         self.rho_crit   = CP.PropsSI("rhocrit", "Helium")
@@ -1117,6 +1117,11 @@ class LOXFluid:
         viscosity       = CP.PropsSI("V", "T", Temp, "P", pres, "Oxygen") # Dynamic viscosity, Pa*s
         self.checkPhase(pres, Temp)
         return viscosity
+        
+    def getVaporPressure(self, fluidTemp):
+        
+        pV = CP.PropsSI("P", "T", fluidTemp, "Q", 1, "Oxygen")
+        return pV    
         
     def checkPhase(self, pres, Temp):
         phase           = CP.PhaseSI("T", Temp, "P", pres, "Oxygen")
@@ -1249,7 +1254,7 @@ class LiquidPropellantTank:
         
         self.FF         = FF                                    # fill fraction is defined as Vpropellant/Vtank
         self.Vprop      = tankvolume*FF                         # propellant volume [m3]
-        self.mProp      = self.Vprop*propellant.density         # propellant mass [kg]
+        self.mProp      = self.Vprop*propellant.getDensity(Ppres, proptemp)         # propellant mass [kg]
         self.Vpres      = tankvolume*(1-FF)                     # pressurant volume [m3]
         self.mPres      = Ppres*self.Vpres/(pressurant.R*Tpres)  # pressurant mass [kg]
     
@@ -1258,7 +1263,7 @@ class LiquidPropellantTank:
     def update (self, T_in, mdot_pres_in, mdot_prop_out, timestep):
        
         #some parameters
-        rooProp         = self.propellant.getDensity()          # liquid propellant density [kg/m3]
+        rooProp         = self.propellant.getDensity(self.Ptank, self.Tprop)          # liquid propellant density [kg/m3]
         gamma           = self.pressurant.gamma                 # pressurant ratio of specific heats
         mbar            = self.pressurant.mbar                  # pressurant molecular mass [kg/kmol]
        
