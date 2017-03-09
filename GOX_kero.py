@@ -286,10 +286,10 @@ for i in range(0, simsteps):
     mu_ox           = GOX.getViscosity(Preg_ox, Toxtank[i])
     roo_ox          = GOX.getDensity(Preg_ox, Toxtank[i])
     Tox             = Toxtank[i]
-    Tpres           = Tfueltank[i]
+    Tpres           = TfuelPres[i]
     mu_fuel         = kerosene.mu
-    mu_N2_fuel      = nitrogen.getViscosity(Preg_N2, Tfueltank[i])
-    roo_N2_fuel     = nitrogen.getDensity(Preg_N2, Tfueltank[i])
+    mu_N2_fuel      = nitrogen.getViscosity(Preg_N2, TfuelPres[i])
+    roo_N2_fuel     = nitrogen.getDensity(Preg_N2, TfuelPres[i])
     
     if i==0:    # First guesses. Based on choked flow at ox injector (multplied by 0.7 to adjust for better convergence)
         
