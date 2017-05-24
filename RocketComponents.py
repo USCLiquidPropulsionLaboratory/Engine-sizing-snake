@@ -215,6 +215,30 @@ class GasOrifice:
         #print("injector mdot is", mdot, "kg/s")     
         return mdot
         
+    def getPressureDrop(self, Pin, Tin, mdot):
+        g = self.gamma
+        f = lambda Pout: self.getMdot(Pin, Pout, Tin) - mdot
+        Pout_solved = opt.brentq(f, 1e-6, Pin)
+        
+        if self.isChoked(Pin, Pout_solved):
+            print("injector flow is choked, cannot solve for pressure drop")
+        else:
+            return Pin - Pout_solved
+            
+    def getUpstreamPressure(self, Pout, Tin, mdot):
+        test_mdot = self.getMdot(950*psi, Pout, Tin)
+        #print("mdot incoming is", mdot, "kg/s")
+        g = self.gamma
+        f = lambda Pin: self.getMdot(Pin, Pout, Tin) - mdot
+        Pin_solved = opt.brentq(f, Pout, 1e10)
+        print("pin_solved is", Pin_solved/psi, "psi")
+        
+        if self.isChoked(Pin_solved, Pout):
+            print("injector flow is choked, cannot solve for upstream pressure")
+        else:
+            return Pin_solved
+        
+        
     def isChoked(self, Pin, Pexit):
         gamma       = self.gamma
         Pin_chokelimit = Pexit*((gamma+1)/2)**(gamma/(gamma-1))
@@ -432,7 +456,7 @@ class LOX_IPACombustionChamber:
         self.gamma  = gammaFire
         self.Pa     = Pambient
         
-        # Interpolation of Tfire, mbar, and gamma from CEA data (extarpolation = assumes closest valid data point)
+        # Interpolation of Tfire, mbar, and gamma from CEA data (extrapolation = assumes closest valid data point)
         pmin,pmax       = 100*psi,500*psi   # psi
         pstep           = 100*psi           # psi
         OFmin, OFmax    = 0.5, 2            # dimensionless 
@@ -578,7 +602,68 @@ class GOXKeroCombustionChamber:
         self.gamma      = gammaFire
         self.Pa         = Pambient
         self.mdot_out   = mdot_out
-    
+        
+        # Interpolation of Tfire, mbar, and gamma from CEA data (extrapolation = assumes closest valid data point)
+        pmin,pmax       = 250*psi,1000*psi   # psi
+        pstep           = 250*psi           # psi
+        OFmin, OFmax    = 0.5, 5            # dimensionless 
+        OFstep          = 0.5               # dimensionless
+
+        p_vector        = np.linspace(pmin,pmax,(pmax-pmin)/pstep+1)
+        OF_vector       = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3, 3.5, 4, 4.5, 5]
+        
+
+        T_grid = np.array([[ 1202, 1252, 1283, 1306],
+       [ 1341, 1390, 1422, 1446],
+       [ 1545, 1576, 1599, 1617],
+       [ 1975, 1976, 1977, 1978],
+       [ 2585, 2593, 2598, 2600],
+       [ 3020, 3054, 3071, 3082],
+       [ 3289, 3352, 3388, 3411],
+       [ 3430, 3518, 3568, 3603],
+       [ 3495, 3595, 3654, 3695],
+       [ 3524, 3632, 3696, 3742],
+       [ 3504, 3611, 3675, 3720],
+       [ 3468, 3571, 3632, 3676],
+       [ 3426, 3523, 3581, 3623],
+       [ 3379, 3472, 3527, 3566]])
+       
+       
+        MW_grid = np.array([[ 17.42, 17.85, 18.13, 18.34 ],
+       [15.95, 16.25, 16.45, 16.60],
+       [15.37, 15.53, 15.65, 15.75],
+       [15.92, 15.92, 15.93, 15.93],
+       [17.64, 17.65, 17.66, 17.67],
+       [19.19, 19.25, 19.28, 19.30],
+       [20.51, 20.63, 20.70, 20.74],
+       [21.61, 21.78, 21.88, 21.94],
+       [22.52, 22.72, 22.84, 22.93],
+       [23.97, 24.21, 24.36, 24.46],
+       [25.13, 25.38, 25.53, 25.64],
+       [26.08, 26.33, 26.48, 26.59],
+       [26.88, 27.13, 27.28, 27.38],
+       [27.56, 27.80, 27.94, 28.05]])      
+       
+        gamma_grid = np.array([[ 1.15, 1.15, 1.15, 1.15],
+       [1.20, 1.20, 1.19, 1.19],
+       [1.27, 1.26, 1.26, 1.25],
+       [1.30, 1.30, 1.30, 1.30],
+       [1.24, 1.25, 1.25, 1.25],
+       [1.19, 1.20, 1.20, 1.21],
+       [1.16, 1.16, 1.17, 1.17],
+       [1.14, 1.14, 1.15, 1.15],
+       [1.13, 1.13, 1.14, 1.14],
+       [1.13, 1.13, 1.13, 1.13],
+       [1.12, 1.13, 1.13, 1.13],
+       [1.12, 1.13, 1.13, 1.13],
+       [1.12, 1.13, 1.13, 1.13],
+       [1.12, 1.13, 1.13, 1.13]])
+       
+        self.T_int      = interpolate.RectBivariateSpline(OF_vector, p_vector, T_grid)     # Note the order of Y and X!!
+        self.MW_int     = interpolate.RectBivariateSpline(OF_vector, p_vector, MW_grid)    # Note the order of Y and X!!
+        self.gamma_int  = interpolate.RectBivariateSpline(OF_vector, p_vector, gamma_grid) # Note the order of Y and X!!
+   
+   
     def get_P_inlet(self):
         #print("kammiopaine on", (self.m/self.V)*(Runiv/self.mbar)*self.T )
         return(self.m/self.V)*(Runiv/self.mbar)*self.T
@@ -587,9 +672,10 @@ class GOXKeroCombustionChamber:
         #print("mdot fuel is", mdot_fuel)
         OF_ratio    = mdot_ox/mdot_fuel
         mdot_in     = mdot_ox + mdot_fuel   
-        self.T      = self.get_Tfire(OF_ratio)
-        self.gamma  = self.get_gamma(OF_ratio)
-        self.mbar   = self.get_mbar(OF_ratio)
+        P           = self.get_P_inlet()
+        self.T      = self.get_Tfire(OF_ratio, P)
+        self.gamma  = self.get_gamma(OF_ratio, P)
+        self.mbar   = self.get_mbar(OF_ratio, P)
         '''   
         self.m      = self.m + (mdot_in - self.mdot_out)*dt
         P           = self.get_P_inlet()
@@ -610,27 +696,19 @@ class GOXKeroCombustionChamber:
         
         m_new       = self.m + (mdot_in - mdot_out_avg)*dt
         self.m      = m_new
-        self.mdot_out = mdot_out_avg 
+        self.mdot_out = mdot_out_avg
         
-    
-        #from CEA code assuming 725 psi (=5 MPa) chamber pressure and OFratio 0.5-3, T_in = 298 K
-    def get_Tfire(self, OFratio):
-        if OFratio >=1.5:
-            return 383.1*OFratio**3 - 3331.8*OFratio**2 + 9688.1*OFratio - 5731.3
-        else:
-            return 1072.0*OFratio**3 - 1881.1*OFratio**2 + 1595.3*OFratio + 821.4
-    
-    def get_gamma(self, OFratio):
-        if OFratio >=1.5:
-            return -0.0332*OFratio**3 + 0.2977*OFratio**2 - 0.8943*OFratio + 2.0323
-        else:
-            return -0.5653*OFratio**3 + 1.4629*OFratio**2 - 0.9904*OFratio + 1.3506
+        #from CEA code assuming 250-1000psi chamber pressure and OF-ratio 0.5-5
         
-    def get_mbar(self, OFratio):
-        if OFratio >=1.5:
-            return 0.32*OFratio**3 - 3.6819*OFratio**2 + 15.99*OFratio + 0.8733
-        else:
-            return 2.9333*OFratio**3 + 0.2286*OFratio**2 - 10.4405*OFratio + 22.9040
+    def get_Tfire(self, OFratio, pressure):
+        return self.T_int.ev(OFratio, pressure)
+        
+    def get_gamma(self, OFratio, pressure):
+        return self.gamma_int.ev(OFratio, pressure)
+        
+    def get_mbar(self, OFratio, pressure):
+        return self.MW_int.ev(OFratio, pressure)
+        
 
 #assumes a smooth tube and Fanning friction factor
 class StraightCylindricalTube:
@@ -786,6 +864,7 @@ class CompressibleFlowCheckValve:
         
         #print("Pin cek is", Pin/psi, "psi")
         #print("Pout chek is", Pout/psi, "psi")
+        #print("selgamma is", self.gamma)
         
         if Pout/Pin <=  (2/(self.gamma+1))**(self.gamma/(self.gamma-1)):
             print("Warning: check valve flow is choked")
@@ -1377,10 +1456,10 @@ class TwoFluidTank:
     # This method is the workhorse that calculates new tank parameters (P,temp etc.) when mass flows in and out
     # are known_________________________________________________________________________________________________
     def update (self, mdot_in, hin, mdot_ox_out, mdot_fuel_out, mdot_vent_out, timestep, i):
-        rooL = self.oxidizer.getLiquidDensity(self.Ttank)
-        rooV = self.oxidizer.getVaporDensity(self.Ttank)
-        cL = self.oxidizer.getLiquidSpecificHeat(self.Ttank)
-        L = self.oxidizer.getLatentHeat(self.Ttank)
+        rooL    = self.oxidizer.getLiquidDensity(self.Ttank)
+        rooV    = self.oxidizer.getVaporDensity(self.Ttank)
+        cL      = self.oxidizer.getLiquidSpecificHeat(self.Ttank)
+        L       = self.oxidizer.getLatentHeat(self.Ttank)
         rooFuel = self.fuel.getDensity()
         
         #calculate mass increments/decrements (assuming constant pressure difference over timestep)
