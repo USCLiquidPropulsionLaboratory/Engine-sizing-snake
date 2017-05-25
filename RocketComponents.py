@@ -923,6 +923,27 @@ class IncompressibleFlowSolenoid:
     def getPressureDrop(self, mdot, rooL):
         return (mdot*60000/(self.Cv*rooL*3.78))**2*psi*rooL/1000
     
+class IncompressibleFlowMeter:
+    def __init__(self, Pdrop):
+        self.Pdrop = Pdrop
+        
+    def getPressureDrop(self):
+        return self.Pdrop
+        
+class CompressibleFlowParticleFilter:
+    def __init__(self, Pdrop):
+        self.Pdrop = Pdrop
+    
+    def getPressureDrop(self):
+        return self.Pdrop
+
+class IncompressibleFlowParticleFilter:
+    def __init__(self, Pdrop):
+        self.Pdrop = Pdrop
+    
+    def getPressureDrop(self):
+        return self.Pdrop    
+    
 class ConvergingDivergingNozzle:
     def __init__(self, Ae, Astar):
         self.Ae = Ae
@@ -1156,10 +1177,13 @@ class IPAFluid:
 class HeFluid:
     
     def __init__(self):
-        self.gamma      = 1.4
+        self.gamma      = 1.67
+        self.mbar       = CP.PropsSI("molarmass", "Helium")*10**3
+        self.R          = Runiv/self.mbar
         self.P_crit     = CP.PropsSI("pcrit", "Helium")
         self.T_crit     = CP.PropsSI("Tcrit", "Helium")
         self.rho_crit   = CP.PropsSI("rhocrit", "Helium")
+        self.roo_std    = CP.PropsSI("D", "T", 293, "P", 101325, "Helium")
     
     def getDensity(self, pres, Temp):
         density         = CP.PropsSI("D", "T", Temp, "P", pres, "Helium") # density, kg/m3
@@ -1186,6 +1210,7 @@ class LOXFluid:
         self.P_crit     = CP.PropsSI("pcrit", "Oxygen")
         self.T_crit     = CP.PropsSI("Tcrit", "Oxygen")
         self.rho_crit   = CP.PropsSI("rhocrit", "Oxygen")
+        self.P_vapor    = CP.PropsSI("P", "T", 90, "Q", 1, "Oxygen")
     
     def getDensity(self, pres, Temp):
         density         = CP.PropsSI("D", "T", Temp, "P", pres, "Oxygen") # density, kg/m3
@@ -1206,8 +1231,8 @@ class LOXFluid:
         phase           = CP.PhaseSI("T", Temp, "P", pres, "Oxygen")
         #print("pres is", pres/psi, "psi")
         #print("temp is", Temp, "K")
-        if phase != 'liquid' and phase != 'supercritical_liquid':
-            print("LOX is", phase, "at this point")
+        #if phase != 'liquid' and phase != 'supercritical_liquid':
+            #print("LOX is", phase, "at this point")
         
         
 class GOXFluid:
@@ -1339,7 +1364,7 @@ class LiquidPropellantTank:
     
     # This method is the workhorse that calculates new tank parameters (P,temp etc.) when mass flows in and out
     # and upstream pressurant temperature are known_______________________________
-    def update (self, T_in, mdot_pres_in, mdot_prop_out, timestep):
+    def update (self, T_in, mdot_pres_in, mdot_prop_out, Pfeed, timestep):
        
         #some parameters
         rooProp         = self.propellant.getDensity(self.Ptank, self.Tprop)          # liquid propellant density [kg/m3]
@@ -1378,8 +1403,8 @@ class LiquidPropellantTank:
         Ppres_new       = Tpres_new*mPres_new*Runiv/(Vpres_new*mbar)
         #print("Tpres_new is", Tpres_new, "K")
         #print("Ppres_new is", Ppres_new/psi, "psi")
-        #print("Pfeed is", self.Pfeed/psi, "psi")
-        if Ppres_new > self.Pfeed:
+        #print("Pfeed is", Pfeed/psi, "psi")
+        if Ppres_new > Pfeed:
             print("WARNING: tank pressure higher than feed pressure. Try decreasing time step")
         
            
