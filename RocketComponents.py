@@ -221,7 +221,7 @@ class GasOrifice:
         Pout_solved = opt.brentq(f, 1e-6, Pin)
         
         if self.isChoked(Pin, Pout_solved):
-            print("injector flow is choked, cannot solve for pressure drop")
+            print("orifice flow is choked, cannot solve for pressure drop")
         else:
             return Pin - Pout_solved
             
@@ -263,6 +263,11 @@ class GasOrifice:
         M       = self.getMexit(Pin, Pexit)                 # Mach number
         return M*a                                          # exit velocity, m/s
     
+    def getCF(self, Pin, Pexit):                            # returns choke factor (CF>=1 means choked)
+        gamma = self.gamma
+        Pin_chokelimit = Pexit*((gamma+1)/2)**(gamma/(gamma-1))
+        return Pin/Pin_chokelimit
+        
 #does not allow flow from exit to inlet (ie check valve)
 class LiquidOrifice:
     #Cd appox 0.62 for square orifice, 0.9 to 0.95 for well-rounded orifice
@@ -755,9 +760,9 @@ class RoughStraightCylindricalTube:
         #print("Re is", Re)
         
         #Churchill
-        C1 = (-2.457*log( (7/Re)**0.9 + 0.27*self.rou) )**16;
-        C2 = (37530/Re)**16;
-        f = 8*( (8/Re)**12 + (C1+C2)**-1.5 )**(1/12);
+        C1 = (-2.457*log( (7/Re)**0.9 + 0.27*self.rou) )**16
+        C2 = (37530/Re)**16
+        f = 8*( (8/Re)**12 + (C1+C2)**-1.5 )**(1/12)
         
         # Chen
         #ff = -2*log10(self.rou/3.7065 - 5.0452/Re*log10(1/2.8257*self.rou**1.1098 + 5.8506/Re**0.8981))
@@ -767,13 +772,15 @@ class RoughStraightCylindricalTube:
         #print("phi2 is", C2)
         #print("f is", f)
         
+        
         A = pi*self.d**2/4
         v = mdot/fluidDensity/A
+        
         #print("v is", v, "m/s")
         if self.headloss == True:
             return 0.5*fluidDensity*v**2*(f*self.l/self.d + 1) # includes head loss due to velocity increase FROM ZERO!
         else :
-            return 0.5*fluidDensity*v**2*(f*self.l/self.d)  # only pressure drop due to friction
+            return 0.5*fluidDensity*v**2*(f*self.l/self.d)  # only pressure drop due to friction and elbows
         
         
     def getMdot(self, Pin, Pout, fluidViscosity, fluidDensity):
@@ -783,22 +790,98 @@ class RoughStraightCylindricalTube:
         else:
             errorFunc = lambda mdot: (Pout-Pin) - self.getPressureDrop(mdot, fluidViscosity, fluidDensity)
             return -opt.fsolve(errorFunc, sqrt(2*fluidDensity*(Pout-Pin)))[0]
+            
+class RoughCylindricalTube:
+    def __init__(self, diameter, length, roughness, headloss, n_90elbows):
+        self.d          = diameter
+        self.l          = length
+        self.rou        = roughness    # defined as epsilon/diameter
+        self.headloss   = headloss
+        self.n_90elbows = n_90elbows
+     
+    def getPressureDrop(self, mdot, fluidViscosity, fluidDensity):  
+        #print("vis is", fluidViscosity)
+        #print("dia is", self.d)
+        
+        Re = 4*mdot/(pi*self.d*fluidViscosity)
+        #print("mdot in tube is", mdot)
+        #print("Re is", Re)
+        
+        #Churchill
+        C1 = (-2.457*log( (7/Re)**0.9 + 0.27*self.rou) )**16
+        C2 = (37530/Re)**16
+        f = 8*( (8/Re)**12 + (C1+C2)**-1.5 )**(1/12)
+        
+        # Chen
+        #ff = -2*log10(self.rou/3.7065 - 5.0452/Re*log10(1/2.8257*self.rou**1.1098 + 5.8506/Re**0.8981))
+        #f  = (1/ff)**2
+        
+        #print("phi1 is", C1)
+        #print("phi2 is", C2)
+        #print("f is", f)
+        
+        
+        A = pi*self.d**2/4
+        v = mdot/fluidDensity/A
+        k_minors    = self.n_90elbows*0.75;
+        
+        #print("v is", v, "m/s")
+        if self.headloss == True:
+            return 0.5*fluidDensity*v**2*(f*self.l/self.d + 1 + k_minors) # includes head loss due to velocity increase FROM ZERO!
+        else :
+            return 0.5*fluidDensity*v**2*(f*self.l/self.d + k_minors)  # only pressure drop due to friction and elbows
+        
+        
+    def getMdot(self, Pin, Pout, fluidViscosity, fluidDensity):
+        if Pin > Pout:
+            errorFunc = lambda mdot: (Pin-Pout) - self.getPressureDrop(mdot[0], fluidViscosity, fluidDensity)
+            return opt.fsolve(errorFunc, sqrt(2*fluidDensity*(Pin-Pout)))[0]
+        else:
+            errorFunc = lambda mdot: (Pout-Pin) - self.getPressureDrop(mdot, fluidViscosity, fluidDensity)
+            return -opt.fsolve(errorFunc, sqrt(2*fluidDensity*(Pout-Pin)))[0]            
     
+
 class PressureRegulator:
     def __init__(self, Pout, fluid):
         self.Pout   = Pout
+        self.fluid  = fluid
     
-    def getTempDrop(self, Pin, Pout, T_in):    #J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
+    def getTempDrop(self, Pin, Pout, T_in):    # J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
         
         def dTdP( T, P): 
-            return self.fluid.getJT(T, P)           # derivative (dT/dP)|constant enthalpy
+            return self.fluid.getJT(P, T)           # derivative (dT/dP)|constant enthalpy
 
         Ps          = np.linspace(Pin, Pout, 5)     # 5 intervals
         T0          = T_in                          # initial conditions
         Ts          = odeint(dTdP, T0, Ps)          # integration results
         T_out       = Ts[-1]
+        #print("Tout is", Ts)
         
         return T_in - T_out                         # Temp drop [K]
+
+class RegulatorController:
+    def __init__(self, rate, Kp, Ti, Td):
+        self.rate     = rate       # rate of sensor reading [ms]
+        self.Kp       = Kp         # proportional coefficient
+        self.Ti       = Ti         # integral time coefficient
+        self.Td       = Td         # derivative time coefficient
+        self.Ki       = Kp/Ti
+        self.Kd       = Kp*Td
+        self.Error    = [0]
+        self.ErrorInt = 0
+        self.ErrorDrv = 0
+        self.Pchange  = 0
+    
+    def getPressureChange(self, Psetpoint, Pfeedback, time, timestep):
+        self.Error.append( Psetpoint - Pfeedback )
+        self.ErrorInt = self.ErrorInt + self.Error[-1]*timestep
+        self.ErrorDrv = (self.Error[-1] - self.Error[-2])/timestep
+        
+        if (time*1000)%self.rate < timestep*1000:
+            self.Pchange = self.Kp*self.Error[-1] + self.Ki*self.ErrorInt + self.Kd*self.ErrorDrv
+            
+        return self.Pchange    
+    
             
 class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handbook
     def __init__(self, Cv, fluid):
@@ -811,12 +894,13 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
         n           = 2.73                                  # dimensionless experimental/unit correction factor
         
         if self.Fgamma*self.xT <= (Pin-Pout)/Pin:
-            print("Pin_gassole is", Pin/psi, "psi")
-            print("Pout_gassole is", Pout/psi, "psi")
-            print("Warning: gas solenoid flow is choked")
+            #print("Pin_gassole is", Pin/psi, "psi")
+            #print("Pout_gassole is", Pout/psi, "psi")
+            #print("Warning: gas solenoid flow is choked")
             Y       = 0.667                                             # choked comperessibility factor
             return self.Cv*n*Y*sqrt(self.Fgamma*self.xT*Pin/1000*roo_in)# mass flow rate [kg/s], eq.12
         else:
+            #print("gas solenoid not choked")
             Y       = 1 - (Pin-Pout)/(Pin*3*self.Fgamma*self.xT)        # compressibility factor
             return self.Cv*n*Y*sqrt((Pin-Pout)/1000*roo_in)/3600        # mass flow rate [kg/s], eq.6
             
@@ -836,7 +920,7 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
     def getTempDrop(self, Pin, Pout, T_in):    #J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
         
         def dTdP( T, P): 
-            return self.fluid.getJT(T, P)           # derivative (dT/dP)|constant enthalpy
+            return self.fluid.getJT(P, T)           # derivative (dT/dP)|constant enthalpy
 
         Ps          = np.linspace(Pin, Pout, 5)     # 5 intervals
         T0          = T_in                          # initial conditions
@@ -844,6 +928,12 @@ class CompressibleFlowSolenoid:         # ISA-75.01.01-2007 valve sizing handboo
         T_out       = Ts[-1]
         
         return T_in - T_out                         # Temp drop [K]
+        
+    def getCF(self, Pin, Pout):                     # calculates choke factor CF (CF>1 means choked)
+        return (Pin-Pout)/Pin / (self.Fgamma*self.xT)
+        
+    def isChoked(self, Pin, Pout):
+        return self.Fgamma*self.xT <= (Pin-Pout)/Pin
         
 class CompressibleFlowCheckValve:
     def __init__(self, Cv, Pcrack, fluid):          # https://www.swagelok.com/downloads/webcatalogs/en/MS-06-84.pdf
@@ -897,13 +987,29 @@ class CompressibleFlowCheckValve:
     def getTempDrop(self, Pin, Pout, T_in):    #J-T coeff is derivative of temp respect to pressure ->integrate to get Tdrop
         
         def dTdP( T, P): 
-            return self.fluid.getJT(T, P)           # derivative (dT/dP)|constant enthalpy
+            return self.fluid.getJT(P, T)           # derivative (dT/dP)|constant enthalpy
 
         Ps          = np.linspace(Pin, Pout, 5)     # 5 intervals
         T0          = T_in                          # initial conditions
         Ts          = odeint(dTdP, T0, Ps)          # integration results
         T_out       = Ts[-1]
         return T_in - T_out                         # Temp drop [K]
+
+class IncompressibleFlowCheckValve:
+    def __init__(self, Cv, Pcrack, fluid):
+        self.Cv     = Cv
+        self.rho    = fluid.density
+        self.Pcrack = Pcrack
+        
+    def getMdot(self, Pin, Pout):
+        N1 = 14.42                                  # when P_units=bar
+        N3 = 0.001/60                               # to convert from g/min to kg/s
+        return N1*self.Cv*sqrt((Pin/atm-Pout/atm)/(self.rho/1000))*self.rho*N3 
+        
+    def getPressureDrop(self, mdot):
+        N1 = 14.42                                  # when P_units=bar
+        N3 = 0.001/60                               # to convert from g/min to kg/s
+        return (mdot/(self.rho*N3*N1*self.Cv))**2*self.rho/1000*atm
 
 class IncompressibleFlowSolenoid:
     def __init__(self, Cv):           # ISA-75.01.01-2007 valve sizing handbook
@@ -963,7 +1069,9 @@ class ConvergingDivergingNozzle:
             Fth = self.Ae*Mexit**2*gamma*Pa
             return Fth/P0/self.Astar
         else:#choked flow
+            #print("choked throat")
             Pe = self.getPe(P0, gamma, Pa)
+            #print("Pe is", Pe/psi, "psi")
             return sqrt(2*gamma**2/(gamma-1)* \
                 (2/(gamma+1))**((gamma+1)/(gamma-1))* \
                 (1-(Pe/P0)**((gamma-1)/gamma))) + \
@@ -1152,7 +1260,7 @@ class N2OFluid:
 class Kerosene:
     
     def __init__(self):
-        self.density    = 800              # kg/m3
+        self.density    = 810              # kg/m3
         self.P_crit     = 1.8e6            # Pa
         #http://thehuwaldtfamily.org/jtrl/research/Propulsion/Rocket%20Propulsion/Propellants/DLR,%20Comparative%20Study%20of%20Kerosene%20and%20Methane%20Engines.pdf
         self.P_vapor    = 2000             # Pa
@@ -1380,6 +1488,7 @@ class LiquidPropellantTank:
         Ppres_int       = self.Ptank*(self.Vpres/Vpres_new)**gamma
         Tpres_int       = self.Tpres*(Ppres_int/self.Ptank)**((gamma-1)/gamma)
         #print("Ppres_old is", self.Ptank/psi, "psi")
+        #print("Pfeed is", Pfeed/psi, "psi")
         #print("Ppres_int is", Ppres_int/psi, "psi")
         #print("Tpres_int is", Tpres_int, "K")
         
